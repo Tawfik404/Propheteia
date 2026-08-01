@@ -773,6 +773,126 @@ button {
   box-shadow: var(--shadow-md);
 }
 
+/* Map Search Bar */
+
+.map-search {
+  position: absolute;
+  top: 64px;
+  left: 20px;
+  z-index: 1000;
+  width: 320px;
+  max-width: calc(100vw - 40px);
+}
+
+.map-search-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.map-search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.map-search-input {
+  width: 100%;
+  height: 40px;
+  padding: 0 34px 0 36px;
+  font-size: 14px;
+  font-family: var(--sans);
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.map-search-input:focus {
+  border-color: var(--primary-red);
+}
+
+.map-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.map-search-spinner {
+  position: absolute;
+  right: 12px;
+  color: var(--text-secondary);
+  animation: spin 0.8s linear infinite;
+}
+
+.map-search-list {
+  margin-top: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  list-style: none;
+}
+
+.map-search-status {
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.map-search-error {
+  color: var(--primary-red);
+}
+
+.map-search-item {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  font-family: var(--sans);
+  font-size: 14px;
+  text-align: left;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.map-search-item:hover,
+.map-search-item-active {
+  background: var(--border-light);
+}
+
+.map-search-item-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--text-secondary);
+}
+
+.map-search-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.map-search-item-name {
+  font-weight: 600;
+}
+
+.map-search-item-region {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ==============================
    Loading / error / location banners
    ============================== */
@@ -1050,6 +1170,14 @@ button {
     right: 12px;
     padding: 12px 16px;
     min-width: 120px;
+  }
+
+  .map-search {
+    top: 60px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: none;
   }
 
   .map-info-panel {

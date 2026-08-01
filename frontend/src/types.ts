@@ -97,3 +97,14 @@ export interface SettingsState {
   notifications: boolean;
   location: boolean;
 }
+
+/** Place-search result from GET /api/geocode. */
+export interface GeocodeResult {
+  id: number | null;
+  name: string;
+  latitude: number;
+  longitude: number;
+  country: string | null;
+  admin1: string | null;
+  formatted: string;
+}

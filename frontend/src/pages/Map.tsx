@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LocateFixed, MapPin, WifiOff } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import MapLegend from '../components/MapLegend';
 import MapInfoPanel from '../components/MapInfoPanel';
+import MapSearchBar from '../components/MapSearchBar';
 import ConnectionStatus from '../components/ConnectionStatus';
 import { usePredictions } from '../hooks/usePredictions';
 import { useLocation } from '../hooks/useLocation';
@@ -50,6 +51,7 @@ export default function MapPage() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const layersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const pulseTimersRef = useRef<Map<string, number>>(new Map());
+  const gpsHandledRef = useRef<string | null>(null);
 
   const { list, byKey, upsert, loading, error } = usePredictions();
   const { setMonitoredArea } = useSocket();
@@ -57,6 +59,34 @@ export default function MapPage() {
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // Center the map on a coordinate, subscribe to its live updates and make
+  // sure a prediction exists for it (fetching one on demand if needed).
+  const focusArea = useCallback(
+    async (lat: number, lon: number) => {
+      const { lat: rLat, lon: rLon } = normalizeCoords(lat, lon);
+      setFetchError(null);
+      setMonitoredArea(rLat, rLon);
+      const map = mapRef.current;
+      if (map) {
+        map.flyTo([rLat, rLon], USER_ZOOM, { duration: 1.2 });
+      }
+
+      const key = locationKey(rLat, rLon);
+      setSelectedKey(key);
+      if (byKey.has(key)) return;
+
+      try {
+        const prediction = await getPrediction(rLat, rLon, true);
+        upsert(prediction);
+      } catch (err) {
+        setFetchError(
+          err instanceof ApiError ? err.message : 'Could not fetch prediction for this area.'
+        );
+      }
+    },
+    [setMonitoredArea, byKey, upsert]
+  );
 
   const userKey = useMemo(
     () => (location.coords ? locationKey(location.coords.lat, location.coords.lon) : null),
@@ -175,30 +205,16 @@ export default function MapPage() {
     }
   }, [list]);
 
-  // Center on the user when GPS resolves (and re-subscribe the area).
+  // Center on the user when GPS resolves (once per resolved position, so
+  // later prediction updates never yank the map away from the user's view).
   useEffect(() => {
     if (!location.coords) return;
-    const map = mapRef.current;
     const { lat, lon } = normalizeCoords(location.coords.lat, location.coords.lon);
-    setMonitoredArea(lat, lon);
-    if (map) {
-      map.flyTo([lat, lon], USER_ZOOM, { duration: 1.2 });
-    }
-
-    // Refresh the user's own prediction; merge straight into the store.
     const key = locationKey(lat, lon);
-    if (byKey.has(key)) return;
-    (async () => {
-      try {
-        const prediction = await getPrediction(lat, lon, true);
-        upsert(prediction);
-      } catch (err) {
-        setFetchError(
-          err instanceof ApiError ? err.message : 'Could not fetch your local prediction.'
-        );
-      }
-    })();
-  }, [location.coords, setMonitoredArea, byKey, upsert]);
+    if (gpsHandledRef.current === key) return;
+    gpsHandledRef.current = key;
+    void focusArea(lat, lon);
+  }, [location.coords, focusArea]);
 
   const handleGPS = () => {
     if (!location.enabled) {
@@ -241,6 +257,9 @@ export default function MapPage() {
       )}
 
       <ConnectionStatus />
+      <MapSearchBar
+        onSelect={(result) => void focusArea(result.latitude, result.longitude)}
+      />
       <MapLegend />
       {info && <MapInfoPanel info={info} />}
 

@@ -5,6 +5,7 @@ import healthRoutes from './health.routes.js';
 import locationsRoutes from './locations.routes.js';
 import alertsRoutes from './alerts.routes.js';
 import predictionsRoutes from './predictions.routes.js';
+import geocodeRoutes from './geocode.routes.js';
 
 const router = Router();
 
@@ -15,6 +16,7 @@ const router = Router();
  *   GET    /api/predict      wildfire danger prediction
  *   GET    /api/predictions  latest prediction snapshots
  *   GET    /api/alerts       nearby + global alert lists
+ *   GET    /api/geocode      place-name search (map search bar)
  *   GET    /api/weather      raw weather data from the active provider
  *   GET    /api/health       server status
  *   GET    /api/locations    monitored location registry (jobs support)
@@ -24,6 +26,7 @@ const router = Router();
 router.use('/predict', predictRoutes);
 router.use('/predictions', predictionsRoutes);
 router.use('/alerts', alertsRoutes);
+router.use('/geocode', geocodeRoutes);
 router.use('/weather', weatherRoutes);
 router.use('/health', healthRoutes);
 router.use('/locations', locationsRoutes);

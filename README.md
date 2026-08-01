@@ -35,6 +35,7 @@ unit (SPA fallback included).
 | GET    | `/api/predict`       | Full wildfire danger prediction for a coordinate         |
 | GET    | `/api/predictions`   | Latest prediction snapshots (one per location)           |
 | GET    | `/api/alerts`        | Nearby + global alert lists                              |
+| GET    | `/api/geocode`       | Place-name search for the map search bar                 |
 | GET    | `/api/weather`       | Raw weather data from the active provider (cached)       |
 | GET    | `/api/health`        | Server status, cache stats, database health              |
 | GET    | `/api/locations`     | List locations monitored by the background jobs          |
@@ -98,6 +99,29 @@ Derives the alert lists from the persisted snapshots:
 - `global` — the most threatening predictions worldwide (country/region
   derived from the monitored location names),
 - `reference` — the reference point's own alert.
+
+### `GET /api/geocode?q=..&limit=8`
+
+Place-name search backed by the Open-Meteo Geocoding API (used by the map
+search bar). Returns up to `limit` (max 10) candidates with coordinates:
+
+```json
+{
+  "query": "marseille",
+  "count": 2,
+  "results": [
+    {
+      "id": 2086257,
+      "name": "Marseille",
+      "latitude": 43.29695,
+      "longitude": 5.38107,
+      "country": "France",
+      "admin1": "Provence-Alpes-Côte d'Azur",
+      "formatted": "Marseille, Provence-Alpes-Côte d'Azur, France"
+    }
+  ]
+}
+```
 
 ## Real-time updates (Socket.IO)
 

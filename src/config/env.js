@@ -41,6 +41,10 @@ export const env = {
   openMeteoBaseUrl: process.env.OPEN_METEO_BASE_URL || 'https://api.open-meteo.com',
   openMeteoTimeoutMs: parseInteger(process.env.OPEN_METEO_TIMEOUT_MS, 8000),
 
+  /** Open-Meteo Geocoding provider */
+  geocodingBaseUrl: process.env.GEOCODING_BASE_URL || 'https://geocoding-api.open-meteo.com',
+  geocodingTimeoutMs: parseInteger(process.env.GEOCODING_TIMEOUT_MS, 6000),
+
   /** Background jobs */
   jobsEnabled: parseBoolean(process.env.JOBS_ENABLED, true),
 

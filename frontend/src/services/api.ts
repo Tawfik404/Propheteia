@@ -1,4 +1,4 @@
-import type { Alert, Prediction } from '../types';
+import type { Alert, GeocodeResult, Prediction } from '../types';
 
 /**
  * Backend base URL. Uses Vite's dev proxy (relative path) in development
@@ -84,6 +84,14 @@ export function getPrediction(lat: number, lon: number, monitor = true) {
 export function getPredictions(limit = 100) {
   return fetchJson<{ count: number; predictions: Prediction[] }>(
     `/api/predictions?limit=${limit}`
+  );
+}
+
+/** Place-name search for the map search bar. */
+export function searchLocations(query: string, limit = 8) {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  return fetchJson<{ query: string; count: number; results: GeocodeResult[] }>(
+    `/api/geocode?${params.toString()}`
   );
 }
 
