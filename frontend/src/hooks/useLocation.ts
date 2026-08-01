@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LocationStatus } from '../types';
 import { useSettings } from '../context/SettingsContext';
-import { getCurrentPosition, type Coordinates, type LocationError } from '../services/location';
+import {
+  distanceKm,
+  getCurrentPosition,
+  type Coordinates,
+  type LocationError,
+} from '../services/location';
 
 export interface LocationState {
   status: LocationStatus;
@@ -23,8 +28,11 @@ export function useLocation(moveThresholdKm = 25) {
   const { settings, enableLocation, disableLocation } = useSettings();
   const [state, setState] = useState<LocationState>(IDLE);
   const coordsRef = useRef<Coordinates | null>(null);
+  const resolvingRef = useRef(false);
 
   const resolve = useCallback(async () => {
+    if (resolvingRef.current) return;
+    resolvingRef.current = true;
     setState((prev) => ({ ...prev, status: 'prompting', error: null }));
     try {
       const coords = await getCurrentPosition();
@@ -37,6 +45,8 @@ export function useLocation(moveThresholdKm = 25) {
         coords: null,
         error: locationError,
       });
+    } finally {
+      resolvingRef.current = false;
     }
   }, []);
 
@@ -60,7 +70,7 @@ export function useLocation(moveThresholdKm = 25) {
     };
   }, [settings.location, resolve]);
 
-  // Re-resolve promptly when the user moves significantly.
+  // Re-resolve promptly when the user moves significantly (haversine).
   const effectiveCoords = settings.location ? state.coords : null;
   useEffect(() => {
     if (!settings.location || !effectiveCoords) return;
@@ -70,11 +80,9 @@ export function useLocation(moveThresholdKm = 25) {
         const lon = position.coords.longitude;
         const prev = coordsRef.current;
         if (!prev) return;
-        const moved =
-          Math.abs(lat - prev.lat) * 111 > moveThresholdKm ||
-          Math.abs(lon - prev.lon) * 111 * Math.cos((prev.lat * Math.PI) / 180) >
-            moveThresholdKm;
-        if (moved) void resolve();
+        if (distanceKm(prev.lat, prev.lon, lat, lon) > moveThresholdKm) {
+          void resolve();
+        }
       },
       undefined,
       { enableHighAccuracy: true, maximumAge: 30000 }
