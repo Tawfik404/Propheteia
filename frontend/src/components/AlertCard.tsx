@@ -4,6 +4,7 @@ import type { Alert } from '../types';
 
 interface AlertCardProps {
   alert: Alert;
+  onClick?: () => void;
 }
 
 function formatTimestamp(iso: string): string {
@@ -17,14 +18,13 @@ function formatTimestamp(iso: string): string {
   });
 }
 
-export default function AlertCard({ alert }: AlertCardProps) {
+export default function AlertCard({ alert, onClick }: AlertCardProps) {
   const { isNew, resolved } = alert;
-  return (
-    <article
-      className={`alert-card${isNew ? ' alert-card-new' : ''}${resolved ? ' alert-card-resolved' : ''}`}
-      tabIndex={0}
-      aria-label={`${resolved ? 'Resolved alert' : 'Alert'} at ${alert.location}, ${alert.riskLevel} risk`}
-    >
+  const className = `alert-card${isNew ? ' alert-card-new' : ''}${resolved ? ' alert-card-resolved' : ''}${onClick ? ' alert-card-clickable' : ''}`;
+  const ariaLabel = `${resolved ? 'Resolved alert' : 'Alert'} at ${alert.location}, ${alert.riskLevel} risk`;
+
+  const content = (
+    <>
       <div className="alert-card-header">
         <div className="alert-card-title-row">
           {resolved ? (
@@ -51,6 +51,24 @@ export default function AlertCard({ alert }: AlertCardProps) {
           Estimated fire probability {alert.fireProbability}% · FWI {alert.fwi}
         </p>
       </div>
-    </article>
+    </>
+  );
+
+  if (!onClick) {
+    return (
+      <article className={className} aria-label={ariaLabel}>
+        {content}
+      </article>
+    );
+  }
+
+  return (
+    <button type="button" className={className} onClick={onClick} aria-label={ariaLabel}>
+      {content}
+      <span className="alert-card-view">
+        <MapPin size={13} aria-hidden="true" />
+        View on map
+      </span>
+    </button>
   );
 }

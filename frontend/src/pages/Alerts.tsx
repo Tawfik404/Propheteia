@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Globe, MapPin, WifiOff } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import AlertCard from '../components/AlertCard';
@@ -12,11 +13,16 @@ import { showNotification } from '../services/notifications';
 
 export default function Alerts() {
   const [showAll, setShowAll] = useState(false);
+  const navigate = useNavigate();
   const { settings } = useSettings();
   const location = useLocation();
   const reference = location.coords ?? null;
 
   const { nearby, global, loading, error } = useAlerts(reference);
+
+  const viewOnMap = (lat: number, lon: number) => {
+    navigate(`/map?lat=${lat}&lon=${lon}`);
+  };
 
   // When the user's own risk increases, surface it immediately (browser
   // notification when enabled).
@@ -104,7 +110,11 @@ export default function Alerts() {
         ) : (
           <div className="alert-cards-grid">
             {nearby.map((alert) => (
-              <AlertCard key={alert.id} alert={alert} />
+              <AlertCard
+                key={alert.id}
+                alert={alert}
+                onClick={() => viewOnMap(alert.lat, alert.lon)}
+              />
             ))}
           </div>
         )}
@@ -119,7 +129,12 @@ export default function Alerts() {
         </div>
         <div className="global-list">
           {visible.map((p) => (
-            <div key={p.id} className="global-card">
+            <button
+              key={p.id}
+              type="button"
+              className="global-card global-card-clickable"
+              onClick={() => viewOnMap(p.lat, p.lon)}
+            >
               <div className="global-card-left">
                 <span className="global-card-country">{p.country ?? p.location}</span>
                 <span className="global-card-region">
@@ -143,8 +158,12 @@ export default function Alerts() {
                   {p.fireProbability}%
                 </span>
                 <span className="global-card-category">{p.riskLevel}</span>
+                <span className="global-card-view">
+                  <MapPin size={12} aria-hidden="true" />
+                  View on map
+                </span>
               </div>
-            </div>
+            </button>
           ))}
         </div>
         {global.length > 4 && (

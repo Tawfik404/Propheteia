@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { LocateFixed, MapPin, WifiOff } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -52,6 +53,9 @@ export default function MapPage() {
   const layersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const pulseTimersRef = useRef<Map<string, number>>(new Map());
   const gpsHandledRef = useRef<string | null>(null);
+  const searchHandledRef = useRef(false);
+
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const { list, byKey, upsert, loading, error } = usePredictions();
   const { setMonitoredArea } = useSocket();
@@ -215,6 +219,26 @@ export default function MapPage() {
     gpsHandledRef.current = key;
     void focusArea(lat, lon);
   }, [location.coords, focusArea]);
+
+  // A link from the Alerts page arrives as ?lat=..&lon=..: focus that spot,
+  // then clean the URL so a later manual visit doesn't re-apply it.
+  const focusAreaRef = useRef(focusArea);
+  useEffect(() => {
+    focusAreaRef.current = focusArea;
+  });
+
+  useEffect(() => {
+    if (searchHandledRef.current) return;
+    const lat = Number(searchParams.get('lat'));
+    const lon = Number(searchParams.get('lon'));
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    searchHandledRef.current = true;
+    void focusAreaRef.current(lat, lon);
+    const timer = window.setTimeout(() => {
+      setSearchParams({}, { replace: true });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [searchParams, setSearchParams]);
 
   const handleGPS = () => {
     if (!location.enabled) {

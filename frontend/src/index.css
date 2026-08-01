@@ -320,6 +320,24 @@ button {
   outline-offset: 2px;
 }
 
+.alert-card-clickable {
+  width: 100%;
+  text-align: left;
+  font-family: var(--sans);
+  color: inherit;
+  cursor: pointer;
+}
+
+.alert-card-view {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary-red);
+}
+
 .alert-card-header {
   margin-bottom: 14px;
 }
@@ -395,6 +413,35 @@ button {
 
 .global-card:hover {
   box-shadow: var(--shadow-md);
+}
+
+.global-card-clickable {
+  width: 100%;
+  text-align: left;
+  font-family: var(--sans);
+  color: inherit;
+  cursor: pointer;
+}
+
+.global-card-clickable:focus-visible {
+  outline: 2px solid var(--primary-red);
+  outline-offset: 2px;
+}
+
+.global-card-view {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary-red);
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+
+.global-card:hover .global-card-view,
+.global-card:focus-visible .global-card-view {
+  opacity: 1;
 }
 
 .global-card-left {
