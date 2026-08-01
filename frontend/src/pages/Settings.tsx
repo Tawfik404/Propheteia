@@ -4,11 +4,55 @@ import PageHeader from '../components/PageHeader';
 import SettingCard from '../components/SettingCard';
 import ToggleSwitch from '../components/ToggleSwitch';
 import { useTheme } from '../context/ThemeContext';
+import { useSettings } from '../context/SettingsContext';
+
+function notificationsStatusText(status: string): string {
+  switch (status) {
+    case 'granted':
+      return 'Notification permissions granted';
+    case 'denied':
+      return 'Blocked in browser settings';
+    case 'default':
+      return 'Permission not requested yet';
+    default:
+      return 'Not supported by this browser';
+  }
+}
 
 export default function Settings() {
   const { theme, toggleTheme } = useTheme();
-  const [notifications, setNotifications] = useState(false);
-  const [gps, setGPS] = useState(false);
+  const {
+    settings,
+    notificationsStatus,
+    notificationsSupported,
+    locationSupported,
+    enableNotifications,
+    disableNotifications,
+    enableLocation,
+    disableLocation,
+  } = useSettings();
+  const [busy, setBusy] = useState(false);
+
+  const handleNotifications = async () => {
+    if (settings.notifications) {
+      disableNotifications();
+      return;
+    }
+    setBusy(true);
+    try {
+      await enableNotifications();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleLocation = () => {
+    if (settings.location) {
+      disableLocation();
+      return;
+    }
+    enableLocation();
+  };
 
   return (
     <div className="page settings-page">
@@ -22,13 +66,14 @@ export default function Settings() {
           icon={<Bell size={22} />}
           title="Enable Notifications"
           description="Receive alerts for nearby wildfire risks."
-          status="Notification permissions not granted"
+          status={notificationsStatusText(notificationsStatus)}
           control={
             <ToggleSwitch
               id="notifications"
-              enabled={notifications}
-              onChange={() => setNotifications(!notifications)}
+              enabled={settings.notifications}
+              onChange={() => void handleNotifications()}
               label="Enable notifications"
+              disabled={!notificationsSupported || busy}
             />
           }
         />
@@ -37,12 +82,14 @@ export default function Settings() {
           icon={<MapPin size={22} />}
           title="Location Access"
           description="Allow the application to determine nearby wildfire risks."
+          status={locationSupported ? undefined : 'Not supported by this browser'}
           control={
             <ToggleSwitch
               id="gps"
-              enabled={gps}
-              onChange={() => setGPS(!gps)}
+              enabled={settings.location}
+              onChange={handleLocation}
               label="Enable location access"
+              disabled={!locationSupported}
             />
           }
         />

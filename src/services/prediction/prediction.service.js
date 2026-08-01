@@ -3,8 +3,10 @@ import { fwiService } from '../fwi/fwi.service.js';
 import { mapFwiToRisk } from '../alerts/risk.mapper.js';
 import FwiStateStore from '../../db/fwiStateStore.js';
 import LocationStore from '../../db/locationStore.js';
-import { normalizeCoordinates } from '../../utils/geo.js';
+import PredictionStore from '../../db/predictionStore.js';
+import { normalizeCoordinates, locationKey } from '../../utils/geo.js';
 import { UnprocessableEntityError } from '../../utils/errors.js';
+import { eventBus } from '../../utils/eventBus.js';
 import logger from '../../utils/logger.js';
 
 /** Local YYYY-MM-DD date for the FWI "today" observation. */
@@ -30,11 +32,13 @@ export class PredictionService {
     fwi = fwiService,
     stateStore = new FwiStateStore(),
     locationStore = new LocationStore(),
+    predictionStore = new PredictionStore(),
   } = {}) {
     this.weather = weather;
     this.fwi = fwi;
     this.stateStore = stateStore;
     this.locationStore = locationStore;
+    this.predictionStore = predictionStore;
   }
 
   /**
@@ -86,13 +90,13 @@ export class PredictionService {
       this.locationStore.register(rLat, rLon);
     }
 
-    const durationMs = Date.now() - startedAt;
-    logger.info(`[predict] prediction completed (${durationMs}ms)`, { lat: rLat, lon: rLon });
+    const name = this.locationName(rLat, rLon);
 
-    return {
+    const prediction = {
       latitude: rLat,
       longitude: rLon,
       predictedAt: new Date().toISOString(),
+      name,
       weather: {
         temperature: weather.temperature,
         humidity: weather.humidity,
@@ -121,6 +125,34 @@ export class PredictionService {
         usedStartupValues: previous.date === null,
       },
     };
+
+    // Persist the snapshot so REST endpoints can serve it without
+    // recomputing, then notify real-time subscribers. The previous risk
+    // level lets the transport detect risk changes and alert transitions.
+    const previousPrediction = this.predictionStore.get(rLat, rLon);
+    this.predictionStore.save(prediction, name);
+    eventBus.emit('prediction:computed', {
+      prediction,
+      previousRiskLevel: previousPrediction?.riskLevel ?? null,
+    });
+
+    const durationMs = Date.now() - startedAt;
+    logger.info(`[predict] prediction completed (${durationMs}ms)`, { lat: rLat, lon: rLon });
+
+    return prediction;
+  }
+
+  /**
+   * Human-readable name for a monitored location, if any.
+   *
+   * @param {number} lat
+   * @param {number} lon
+   * @returns {string|null}
+   */
+  locationName(lat, lon) {
+    const key = locationKey(lat, lon);
+    const entry = this.locationStore.list().find((loc) => loc.locationKey === key);
+    return entry?.name ?? null;
   }
 }
 

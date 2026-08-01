@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import logger from '../../utils/logger.js';
 import weatherService from '../../services/weather/weather.service.js';
 import LocationStore from '../../db/locationStore.js';
+import { eventBus } from '../../utils/eventBus.js';
 
 /**
  * Hourly weather refresh job.
@@ -38,19 +39,22 @@ class WeatherRefreshJob {
         return;
       }
 
-      const results = await Promise.allSettled(
-        locations.map(async ({ lat, lon }) => {
-          try {
-            await this.service.getWeather(lat, lon, { bypassCache: true });
-            return { lat, lon, ok: true };
-          } catch (err) {
-            return { lat, lon, ok: false, error: err.message };
-          }
-        })
-      );
-
-      const refreshed = results.filter((r) => r.status === 'fulfilled' && r.value.ok).length;
-      const failed = results.length - refreshed;
+      // Sequential with a small delay: the weather provider rejects bursts
+      // of parallel requests, and a staggered refresh pre-warms the cache
+      // without hammering the API.
+      let refreshed = 0;
+      let failed = 0;
+      for (const { lat, lon } of locations) {
+        try {
+          const weather = await this.service.getWeather(lat, lon, { bypassCache: true });
+          eventBus.emit('weather:refreshed', { lat, lon, weather });
+          refreshed += 1;
+        } catch (err) {
+          failed += 1;
+          logger.warn(`[job] weather-refresh failed for (${lat}, ${lon}): ${err.message}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
 
       logger.info(
         `[job] weather-refresh completed in ${Date.now() - startedAt}ms ` +

@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import express from 'express';
 import routes from './routes/index.js';
 import { requestLogger } from './middleware/requestLogger.js';
@@ -31,6 +33,15 @@ export function createApp() {
 
   // API routes.
   app.use('/api', routes);
+
+  // Serve the built frontend (single deployable unit) when present.
+  const distDir = path.resolve(process.cwd(), 'frontend', 'dist');
+  if (fs.existsSync(path.join(distDir, 'index.html'))) {
+    app.use(express.static(distDir));
+    app.get(/^(?!\/api).*/, (req, res) => {
+      res.sendFile(path.join(distDir, 'index.html'));
+    });
+  }
 
   // 404 for unknown routes, then the central error handler.
   app.use(notFoundHandler);

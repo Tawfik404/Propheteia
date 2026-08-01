@@ -1,17 +1,12 @@
 import type { RiskLevel } from '../types';
-
-const colors: Record<RiskLevel, { bg: string; text: string }> = {
-  Low: { bg: '#4F7B58', text: '#fff' },
-  Medium: { bg: '#ECE0A6', text: '#540302' },
-  High: { bg: '#AB3130', text: '#fff' },
-};
+import { riskBadgeColors } from '../utils/risk';
 
 interface RiskBadgeProps {
   level: RiskLevel;
 }
 
 export default function RiskBadge({ level }: RiskBadgeProps) {
-  const { bg, text } = colors[level];
+  const { bg, text } = riskBadgeColors[level] ?? riskBadgeColors.Low;
   return (
     <span
       className="risk-badge"

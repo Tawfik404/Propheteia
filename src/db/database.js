@@ -44,6 +44,24 @@ CREATE TABLE IF NOT EXISTS monitored_locations (
   name         TEXT,
   created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS predictions (
+  location_key     TEXT PRIMARY KEY,
+  lat              REAL NOT NULL,
+  lon              REAL NOT NULL,
+  name             TEXT,
+  risk_level       TEXT NOT NULL,
+  fire_probability INTEGER NOT NULL,
+  fwi              REAL NOT NULL,
+  temperature      REAL NOT NULL,
+  humidity         REAL NOT NULL,
+  wind_speed       REAL NOT NULL,
+  payload          TEXT NOT NULL,
+  predicted_at     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_predictions_predicted_at
+  ON predictions (predicted_at DESC);
 `;
 
 /**

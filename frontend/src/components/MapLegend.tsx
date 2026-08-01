@@ -1,10 +1,14 @@
-export default function MapLegend() {
-  const items = [
-    { color: '#4F7B58', label: 'Low Risk' },
-    { color: '#ECE0A6', label: 'Medium Risk' },
-    { color: '#AB3130', label: 'High Risk' },
-  ];
+import { riskColors } from '../utils/risk';
 
+const items = [
+  { color: riskColors['Very Low'], label: 'Very Low Risk' },
+  { color: riskColors.Low, label: 'Low Risk' },
+  { color: riskColors.Moderate, label: 'Moderate Risk' },
+  { color: riskColors.High, label: 'High Risk' },
+  { color: riskColors.Extreme, label: 'Extreme Risk' },
+];
+
+export default function MapLegend() {
   return (
     <div className="map-legend" role="complementary" aria-label="Map legend">
       <h4 className="map-legend-title">Risk Levels</h4>

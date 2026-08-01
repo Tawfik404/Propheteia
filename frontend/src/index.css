@@ -729,6 +729,284 @@ button {
 }
 
 /* ==============================
+   Real-time connection status
+   ============================== */
+
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  transition: background var(--transition), color var(--transition);
+}
+
+.connection-status-connected {
+  color: var(--forest-green);
+  border-color: rgba(79, 123, 88, 0.35);
+}
+
+.connection-status-reconnecting,
+.connection-status-connecting {
+  color: var(--primary-red);
+  border-color: rgba(171, 49, 48, 0.35);
+}
+
+.connection-status-offline {
+  color: var(--text-muted);
+}
+
+/* Map page: status badge floats over the map */
+.map-page .connection-status {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 1000;
+  margin-bottom: 0;
+  box-shadow: var(--shadow-md);
+}
+
+/* ==============================
+   Loading / error / location banners
+   ============================== */
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary-red);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 1.2s linear infinite;
+}
+
+.alerts-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  padding: 24px 0;
+}
+
+.alerts-empty {
+  color: var(--text-secondary);
+  font-size: 14px;
+  padding: 16px;
+  background: var(--bg-card);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+}
+
+.map-loading {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 18px;
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(171, 49, 48, 0.08);
+  border: 1px solid rgba(171, 49, 48, 0.35);
+  color: var(--primary-red);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.location-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+.location-banner strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.location-banner > svg {
+  color: var(--primary-red);
+  flex-shrink: 0;
+}
+
+.location-banner-btn {
+  margin-left: auto;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--primary-red);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+  transition: background var(--transition);
+}
+
+.location-banner-btn:hover {
+  background: var(--primary-dark);
+}
+
+/* Floating banners on the map page */
+.map-page .error-banner,
+.map-page .location-banner {
+  position: absolute;
+  top: 70px;
+  left: 20px;
+  right: 20px;
+  z-index: 1000;
+  max-width: 420px;
+  box-shadow: var(--shadow-md);
+}
+
+/* ==============================
+   Alert cards (live updates)
+   ============================== */
+
+.alert-card-location {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.alert-card-location-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.alert-card-distance {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.alert-card-resolved-icon {
+  color: var(--forest-green);
+  flex-shrink: 0;
+}
+
+.alert-card-resolved {
+  opacity: 0.55;
+}
+
+.alert-card-resolved .alert-card-time {
+  color: var(--forest-green);
+}
+
+/* Subtle highlight for alerts that just arrived over the socket */
+@keyframes alertHighlight {
+  0%   { border-color: var(--primary-red); box-shadow: 0 0 0 3px rgba(171, 49, 48, 0.18); transform: translateY(-2px); }
+  100% { border-color: var(--border); box-shadow: var(--shadow-sm); transform: translateY(0); }
+}
+
+.alert-card-new {
+  animation: alertHighlight 4s ease;
+}
+
+.global-card-category {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 3px 10px;
+}
+
+.toggle-switch.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Map info panel risk badge */
+.map-info-risk {
+  margin-bottom: 12px;
+}
+
+/* Leaflet popup styling */
+.marker-popup {
+  font-size: 13px;
+  line-height: 1.5;
+  min-width: 170px;
+}
+
+.marker-popup-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.marker-popup-risk {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.marker-popup-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--text-secondary);
+}
+
+.marker-popup-row b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+}
+
+.leaflet-popup-tip {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+}
+
+/* ==============================
    Responsive - Tablet & Mobile
    ============================== */
 

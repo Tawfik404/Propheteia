@@ -39,24 +39,28 @@ class FwiRecalculationJob {
         return;
       }
 
-      const results = await Promise.allSettled(
-        locations.map(async ({ lat, lon }) => {
-          try {
-            const prediction = await this.prediction.predict(lat, lon);
-            return { lat, lon, ok: true, fwi: prediction.indices.FWI };
-          } catch (err) {
-            return { lat, lon, ok: false, error: err.message };
-          }
-        })
-      );
-
-      const ok = results.filter((r) => r.status === 'fulfilled' && r.value.ok);
-      const failed = results.length - ok.length;
+      // Sequential with a small delay: the weather provider rejects bursts
+      // of parallel requests, and a staggered pass keeps the recursive
+      // state fresh without hammering the API.
+      const fwiValues = [];
+      let ok = 0;
+      let failed = 0;
+      for (const { lat, lon } of locations) {
+        try {
+          const prediction = await this.prediction.predict(lat, lon);
+          ok += 1;
+          fwiValues.push(prediction.indices.FWI);
+        } catch (err) {
+          failed += 1;
+          logger.warn(`[job] fwi-recalculation failed for (${lat}, ${lon}): ${err.message}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
 
       logger.info(
         `[job] fwi-recalculation completed in ${Date.now() - startedAt}ms ` +
-          `(ok=${ok.length}, failed=${failed})`,
-        { fwiValues: ok.map((r) => r.value.fwi) }
+          `(ok=${ok}, failed=${failed})`,
+        { fwiValues }
       );
     } catch (err) {
       logger.error(`[job] fwi-recalculation failed: ${err.message}`);

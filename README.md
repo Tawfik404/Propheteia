@@ -1,29 +1,40 @@
-# Propheteia Backend
+# Propheteia
 
-Wildfire prediction platform backend. Computes the wildfire danger for any
-geographic coordinate using the **official Canadian Forest Fire Weather Index
-(FWI) System** (Van Wagner 1987) and real-time weather data from the
+Wildfire prediction platform. Computes the wildfire danger for any
+geographic coordinate using the **official Canadian Forest Fire Weather
+Index (FWI) System** (Van Wagner 1987) and real-time weather data from the
 [Open-Meteo API](https://open-meteo.com/).
 
-This repository contains **backend code only** — no frontend.
+The repository contains the **Node.js/Express backend** and the **React
+frontend** (`frontend/`). The frontend loads initial data over REST and
+receives real-time updates over Socket.IO.
 
 ---
 
 ## Quick start
 
 ```bash
+# Backend (repo root)
 npm install
 cp .env.example .env        # optional; sensible defaults exist
 npm start                   # or: npm run dev
+
+# Frontend (frontend/ dir, in another terminal)
+npm install
+npm run dev                 # http://localhost:5173 (proxies /api + /socket.io)
 ```
 
-The server listens on `http://0.0.0.0:3000` by default.
+The server listens on `http://0.0.0.0:3000` by default. When `frontend/dist`
+exists, the backend also serves the built frontend as a single deployable
+unit (SPA fallback included).
 
 ## Endpoints
 
 | Method | Path                 | Description                                              |
 | ------ | -------------------- | -------------------------------------------------------- |
 | GET    | `/api/predict`       | Full wildfire danger prediction for a coordinate         |
+| GET    | `/api/predictions`   | Latest prediction snapshots (one per location)           |
+| GET    | `/api/alerts`        | Nearby + global alert lists                              |
 | GET    | `/api/weather`       | Raw weather data from the active provider (cached)       |
 | GET    | `/api/health`        | Server status, cache stats, database health              |
 | GET    | `/api/locations`     | List locations monitored by the background jobs          |
@@ -71,6 +82,51 @@ Response:
 
 `monitor=1` (e.g. `?lat=..&lon=..&monitor=1`) additionally registers the
 location so the background jobs keep its state fresh.
+
+### `GET /api/predictions?limit=50`
+
+Latest prediction snapshot per location (newest first), persisted whenever a
+prediction is computed (API requests and background jobs). Drives the map
+markers and the global predictions list.
+
+### `GET /api/alerts?lat=..&lon=..&radiusKm=600`
+
+Derives the alert lists from the persisted snapshots:
+
+- `nearby` — predictions within `radiusKm` of the reference point (the
+  point's own prediction is computed live), ordered by distance,
+- `global` — the most threatening predictions worldwide (country/region
+  derived from the monitored location names),
+- `reference` — the reference point's own alert.
+
+## Real-time updates (Socket.IO)
+
+Clients connect to `/socket.io`, join the `global` room automatically, and
+may subscribe to a monitored area with:
+
+| Direction | Event            | Payload                                        |
+| --------- | ---------------- | ---------------------------------------------- |
+| client →  | `monitor:area`   | `{ lat, lon }`                                 |
+| client →  | `unmonitor`      | —                                              |
+| server →  | `area:monitored` | `{ key, lat, lon }`                            |
+| server →  | `prediction:updated` | full prediction payload                     |
+| server →  | `weather:updated`| `{ lat, lon, weather }`                        |
+| server →  | `risk:changed`   | `{ lat, lon, previousRiskLevel, currentRiskLevel, prediction }` |
+| server →  | `alert:new`      | alert-shaped prediction                        |
+| server →  | `alert:resolved` | `{ lat, lon, riskLevel }`                      |
+
+Events are emitted whenever a prediction is computed (API or background
+jobs); area-scoped events are additionally delivered to the corresponding
+`area:<lat,lon>` room.
+
+## Frontend
+
+`frontend/` is a React + TypeScript + Vite app with pages for Alerts, Map
+(Leaflet) and Settings. State lives in `src/hooks/` (`usePredictions`,
+`useAlerts`, `useLocation`, `useSocket`) backed by the services in
+`src/services/` (`api`, `socket`, `location`, `notifications`, `storage`).
+Preferences (notifications, location access, theme) persist in
+`localStorage`; browser notifications fire when a nearby risk increases.
 
 ### `GET /api/weather?lat=..&lon=..&refresh=1`
 
