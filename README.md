@@ -109,6 +109,10 @@ fetched in batches through the provider. The response includes `count`,
 `spacing` and the `predictions` array. Real-time updates for the visible
 viewport arrive over the socket via `subscribe:view` (see below).
 
+Very low zooms (the whole world) are never computed: the backend refuses
+regions that would still exceed the cell cap after coarsening, and the map
+falls back to the latest persisted snapshots (`?limit=`) instead.
+
 ### `GET /api/alerts?lat=..&lon=..&radiusKm=600`
 
 Derives the alert lists from the persisted snapshots:

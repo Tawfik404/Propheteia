@@ -20,6 +20,14 @@ import logger from '../../../utils/logger.js';
  * System, since the system expects a 24-hour accumulated rainfall input
  * (Van Wagner 1987).
  */
+
+/** HTTP statuses worth retrying (rate limits + transient server errors). */
+const RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
+/** Total attempts per request (1 initial + 2 retries). */
+const MAX_ATTEMPTS = 3;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export class OpenMeteoProvider {
   constructor({ baseUrl = env.openMeteoBaseUrl, timeoutMs = env.openMeteoTimeoutMs } = {}) {
     this.client = axios.create({
@@ -27,6 +35,56 @@ export class OpenMeteoProvider {
       timeout: timeoutMs,
       headers: { 'User-Agent': 'propheteia-backend/1.0' },
     });
+  }
+
+  /**
+   * GET with retry: transient failures (timeouts, 429, 5xx) are retried
+   * with exponential backoff (honoring `Retry-After` when present) so a
+   * rate-limited provider does not fail an entire grid computation.
+   *
+   * @param {string} url
+   * @param {object} params - axios query params
+   * @param {string} label - log label, e.g. "request" or "batch"
+   * @returns {Promise<import('axios').AxiosResponse>}
+   * @throws {GatewayTimeoutError|ExternalServiceError} when all attempts fail
+   */
+  async fetchWithRetry(url, params, label) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      const startedAt = Date.now();
+      try {
+        return await this.client.get(url, { params });
+      } catch (err) {
+        const durationMs = Date.now() - startedAt;
+        lastError = err;
+        const status = err.response?.status;
+        const timedOut = err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT';
+        const retriable = timedOut || RETRY_STATUSES.has(status);
+        if (!retriable || attempt === MAX_ATTEMPTS) {
+          if (timedOut) {
+            logger.error(`[weather] open-meteo ${label} request timed out (${durationMs}ms)`);
+            throw new GatewayTimeoutError('Weather service request timed out');
+          }
+          logger.error(
+            `[weather] open-meteo ${label} request failed (${durationMs}ms) status=${status ?? 'network'}`
+          );
+          throw new ExternalServiceError(
+            'Weather service unavailable',
+            { provider: 'open-meteo', status, durationMs }
+          );
+        }
+        const retryAfterSec = Number(err.response?.headers?.['retry-after']);
+        const delayMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0
+          ? retryAfterSec * 1000
+          : Math.min(4000, 500 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 250);
+        logger.warn(
+          `[weather] open-meteo ${label} request failed (status=${status ?? 'network'}), ` +
+            `retrying in ${delayMs}ms (attempt ${attempt}/${MAX_ATTEMPTS})`
+        );
+        await sleep(delayMs);
+      }
+    }
+    throw lastError;
   }
 
   /**
@@ -39,34 +97,19 @@ export class OpenMeteoProvider {
    */
   async getWeather(lat, lon) {
     const startedAt = Date.now();
-    let response;
-    try {
-      response = await this.client.get('/v1/forecast', {
-        params: {
-          latitude: lat,
-          longitude: lon,
-          current: 'temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation,weather_code',
-          daily: 'precipitation_sum',
-          timezone: 'auto',
-          wind_speed_unit: 'kmh',
-          forecast_days: 1,
-        },
-      });
-    } catch (err) {
-      const durationMs = Date.now() - startedAt;
-      if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') {
-        logger.error(`[weather] open-meteo request timed out (${durationMs}ms)`);
-        throw new GatewayTimeoutError('Weather service request timed out');
-      }
-      const status = err.response?.status;
-      logger.error(
-        `[weather] open-meteo request failed (${durationMs}ms) status=${status ?? 'network'}`
-      );
-      throw new ExternalServiceError(
-        'Weather service unavailable',
-        { provider: 'open-meteo', status, durationMs }
-      );
-    }
+    const response = await this.fetchWithRetry(
+      '/v1/forecast',
+      {
+        latitude: lat,
+        longitude: lon,
+        current: 'temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation,weather_code',
+        daily: 'precipitation_sum',
+        timezone: 'auto',
+        wind_speed_unit: 'kmh',
+        forecast_days: 1,
+      },
+      'forecast'
+    );
 
     const durationMs = Date.now() - startedAt;
     logger.info(`[weather] open-meteo request completed (${durationMs}ms)`, { lat, lon });
@@ -91,38 +134,21 @@ export class OpenMeteoProvider {
     for (let i = 0; i < points.length; i += chunkSize) {
       const chunk = points.slice(i, i + chunkSize);
       const startedAt = Date.now();
-      let response;
-      try {
-        const params = [];
-        for (const { lat, lon } of chunk) {
-          params.push(`latitude=${lat}&longitude=${lon}`);
-        }
-        response = await this.client.get(`/v1/forecast?${params.join('&')}`, {
-          params: {
-            current:
-              'temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation,weather_code',
-            daily: 'precipitation_sum',
-            timezone: 'auto',
-            wind_speed_unit: 'kmh',
-            forecast_days: 1,
-          },
-        });
-      } catch (err) {
-        const durationMs = Date.now() - startedAt;
-        if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') {
-          logger.error(`[weather] open-meteo batch request timed out (${durationMs}ms)`);
-          throw new GatewayTimeoutError('Weather service request timed out');
-        }
-        const status = err.response?.status;
-        logger.error(
-          `[weather] open-meteo batch request failed (${durationMs}ms) status=${status ?? 'network'}`
-        );
-        throw new ExternalServiceError('Weather service unavailable', {
-          provider: 'open-meteo',
-          status,
-          durationMs,
-        });
+      const params = [];
+      for (const { lat, lon } of chunk) {
+        params.push(`latitude=${lat}&longitude=${lon}`);
       }
+      const response = await this.fetchWithRetry(
+        `/v1/forecast?${params.join('&')}`,
+        {
+          current: 'temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation,weather_code',
+          daily: 'precipitation_sum',
+          timezone: 'auto',
+          wind_speed_unit: 'kmh',
+          forecast_days: 1,
+        },
+        'batch'
+      );
 
       const durationMs = Date.now() - startedAt;
       logger.info(`[weather] open-meteo batch completed (${durationMs}ms)`, {

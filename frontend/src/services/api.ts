@@ -28,7 +28,10 @@ export class ApiError extends Error {
  *        (aborting it cancels the request so a newer one can replace it)
  * @returns parsed JSON body
  */
-export async function fetchJson<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function fetchJson<T>(
+  path: string,
+  options: RequestInit & { timeoutMs?: number } = {}
+): Promise<T> {
   const controller = new AbortController();
   const external = options.signal;
   if (external) {
@@ -38,7 +41,7 @@ export async function fetchJson<T>(path: string, options: RequestInit = {}): Pro
       external.addEventListener('abort', () => controller.abort(), { once: true });
     }
   }
-  const timer = setTimeout(() => controller.abort(), 15000);
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 15000);
 
   let response: Response;
   try {
@@ -110,7 +113,8 @@ export interface RegionResponse {
  *
  * The backend computes a zoom-dependent grid inside these bounds — it
  * never returns the whole world. Pass an AbortSignal so a newer viewport
- * request can cancel an older, slower one.
+ * request can cancel an older, slower one. Region computes take longer
+ * than point requests, so the fetch timeout is extended.
  */
 export function getPredictionsInBounds(region: MapRegion, signal?: AbortSignal) {
   const params = new URLSearchParams({
@@ -120,6 +124,21 @@ export function getPredictionsInBounds(region: MapRegion, signal?: AbortSignal) 
     west: String(region.west),
     z: String(region.zoom),
   });
+  return fetchJson<RegionResponse>(`/api/predictions?${params.toString()}`, {
+    signal,
+    timeoutMs: 45000,
+  });
+}
+
+/**
+ * Latest persisted prediction snapshots (newest first).
+ *
+ * Used for very low map zooms, where a grid computation would span the
+ * whole world (the backend refuses those) — the map shows what is already
+ * known instead of waiting for a full recompute.
+ */
+export function getLatestPredictions(limit = 100, signal?: AbortSignal) {
+  const params = new URLSearchParams({ limit: String(limit) });
   return fetchJson<RegionResponse>(`/api/predictions?${params.toString()}`, { signal });
 }
 

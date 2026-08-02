@@ -115,10 +115,20 @@ export class GridService {
     let cells = this.cells({ north, south, east, west }, spacing);
 
     // Guard against pathological viewports: coarsen until the cell count
-    // fits, so a single request can never explode.
-    while (cells.length > GRID_MAX_CELLS) {
+    // fits. Beyond 8° spacing a region is "the whole world" — never
+    // compute it, so a map at world zoom stays cheap (it falls back to
+    // the latest persisted snapshots client-side).
+    while (cells.length > GRID_MAX_CELLS && spacing < 8) {
       spacing *= 2;
       cells = this.cells({ north, south, east, west }, spacing);
+    }
+    if (cells.length > GRID_MAX_CELLS) {
+      return {
+        count: 0,
+        spacing,
+        region: { north, south, east, west, zoom },
+        predictions: [],
+      };
     }
 
     const quantize = (value) => Math.round(value / spacing);

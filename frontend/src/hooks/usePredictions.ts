@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MapInfo, Prediction } from '../types';
-import { getPredictionsInBounds, ApiError, type MapRegion } from '../services/api';
+import {
+  getPredictionsInBounds,
+  getLatestPredictions,
+  ApiError,
+  type MapRegion,
+} from '../services/api';
 import { useSocket } from '../context/SocketContext';
 import { locationKey } from './helpers';
 
@@ -8,9 +13,15 @@ import { locationKey } from './helpers';
 const REGION_CACHE_TTL_MS = 10 * 60 * 1000;
 /** Max number of cached regions kept in memory (oldest evicted). */
 const REGION_CACHE_MAX = 10;
+/** Below this zoom a region covers the world — use persisted snapshots. */
+const LOW_ZOOM_THRESHOLD = 5;
+/** How many persisted snapshots to show at very low zoom. */
+const LOW_ZOOM_LIMIT = 100;
+/** Fixed cache key for the "whole world at low zoom" snapshot load. */
+const GLOBAL_REGION_KEY = 'global';
 
 interface RegionEntry {
-  region: MapRegion;
+  region: MapRegion | null;
   cellKeys: string[];
   fetchedAt: number;
 }
@@ -77,7 +88,10 @@ export function usePredictions(): PredictionsState {
 
   const loadRegion = useCallback(
     (region: MapRegion) => {
-      const key = regionKey(region);
+      // At very low zoom the viewport covers the world; the backend
+      // refuses to compute a world grid, so show persisted snapshots.
+      const useSnapshots = region.zoom < LOW_ZOOM_THRESHOLD;
+      const key = useSnapshots ? GLOBAL_REGION_KEY : regionKey(region);
       const cached = regionsRef.current.get(key);
       if (cached && Date.now() - cached.fetchedAt < REGION_CACHE_TTL_MS) {
         setActiveRegionKey(key);
@@ -95,13 +109,15 @@ export function usePredictions(): PredictionsState {
 
       void (async () => {
         try {
-          const { predictions } = await getPredictionsInBounds(region, controller.signal);
+          const { predictions } = useSnapshots
+            ? await getLatestPredictions(LOW_ZOOM_LIMIT, controller.signal)
+            : await getPredictionsInBounds(region, controller.signal);
 
           const cellKeys = predictions.map((p) =>
             locationKey(p.latitude, p.longitude)
           );
           const nextRegions = new Map(regionsRef.current);
-          nextRegions.set(key, { region, cellKeys, fetchedAt: Date.now() });
+          nextRegions.set(key, { region: useSnapshots ? null : region, cellKeys, fetchedAt: Date.now() });
 
           // Evict the oldest regions beyond the cache cap.
           const evictedCellKeys = new Set<string>();

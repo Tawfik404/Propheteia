@@ -289,6 +289,7 @@ export default function MapPage() {
 
   useEffect(() => {
     if (searchHandledRef.current) return;
+    if (!searchParams.has('lat') || !searchParams.has('lon')) return;
     const lat = Number(searchParams.get('lat'));
     const lon = Number(searchParams.get('lon'));
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
