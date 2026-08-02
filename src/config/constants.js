@@ -103,6 +103,40 @@ export const RISK_BANDS = Object.freeze([
 /** Coordinate rounding precision used to build location cache keys (~11 m). */
 export const COORDINATE_ROUNDING = 4;
 
+/**
+ * Prediction grid spacing per zoom band (degrees of latitude/longitude).
+ *
+ * The grid gets finer as the user zooms in, so prediction density matches
+ * what the viewport can meaningfully display:
+ *
+ *   zoom <=  4  -> 0.25 deg  (~25 km)
+ *   zoom 5-8    -> 0.1  deg  (~10 km)
+ *   zoom 9-12   -> 0.02 deg  (~2 km)
+ *   zoom 13+    -> 0.01 deg  (~1 km)
+ */
+export const GRID_SPACING_BY_ZOOM = Object.freeze([
+  { maxZoom: 4, spacing: 0.25 },
+  { maxZoom: 8, spacing: 0.1 },
+  { maxZoom: 12, spacing: 0.02 },
+  { maxZoom: Number.POSITIVE_INFINITY, spacing: 0.01 },
+]);
+
+/** Hard cap on grid cells per viewport request (coarser when exceeded). */
+export const GRID_MAX_CELLS = 5000;
+
+/** Grid result cache TTL (seconds). */
+export const GRID_RESULT_TTL_SECONDS = 600;
+
+/**
+ * Minimum risk for a grid cell to be persisted into the prediction store.
+ * Grid cells below this are served to the requesting viewport but never
+ * stored or broadcast, keeping the store and the event bus small.
+ */
+export const GRID_PERSIST_MIN_RISK = 'Moderate';
+
+/** Row cap for the persisted prediction store (newest kept). */
+export const PREDICTION_STORE_MAX_ROWS = 3000;
+
 /** Open-Meteo variables required for the FWI System. */
 export const OPEN_METEO_REQUIRED_FIELDS = Object.freeze([
   'temperature_2m',

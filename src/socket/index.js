@@ -8,17 +8,25 @@ import { ALERT_RISK_THRESHOLD } from '../services/alerts/alerts.service.js';
  * Real-time transport (Socket.IO).
  *
  * Client contract:
- *   emit  "monitor:area"  { lat, lon }          subscribe to a location's updates
- *   emit  "unmonitor"                            leave all subscribed areas
- *   hear  "connection:status" { status }         connected / reconnecting / offline
- *   hear  "prediction:updated"  { prediction }   full prediction for an area
+ *   emit  "monitor:area"     { lat, lon }           subscribe to a location's updates
+ *   emit  "unmonitor"                                leave all subscribed areas
+ *   emit  "subscribe:view"   { north, south, east, west, zoom }  subscribe to a map viewport
+ *   emit  "unsubscribe:view"                          leave the viewport subscription
+ *   hear  "connection:status" { status }              connected / reconnecting / offline
+ *   hear  "area:monitored"   { key, lat, lon }
+ *   hear  "prediction:updated"  { prediction }        full prediction for an area
  *   hear  "weather:updated"     { lat, lon, weather }
- *   hear  "alert:new"      { alert }
+ *   hear  "risk:changed"      { lat, lon, previousRiskLevel, currentRiskLevel, prediction }
+ *   hear  "alert:new"      { alert }                  broadcast to every client
  *   hear  "alert:resolved" { lat, lon }
- *   hear  "risk:changed"   { lat, lon, previousRiskLevel, currentRiskLevel, prediction }
  *
- * Every client joins the "global" room on connect, so prediction/alert
- * broadcasts reach everyone; area rooms scope updates to monitored spots.
+ * Delivery policy:
+ *   - `prediction:updated`, `weather:updated` and `risk:changed` are sent
+ *     only to clients that subscribed to the affected area (monitor:area)
+ *     or whose viewport contains the point (subscribe:view). Clients
+ *     never receive predictions for areas they are not looking at.
+ *   - `alert:new` / `alert:resolved` are global (rare, and the alerts
+ *     page needs them regardless of the current viewport).
  */
 
 const GLOBAL_ROOM = 'global';
@@ -75,7 +83,20 @@ export function initSocket(server) {
       socket.emit('area:unmonitored');
     });
 
+    socket.on('subscribe:view', (view = {}) => {
+      const parsed = parseView(view);
+      if (!parsed) return;
+      socket.data.view = parsed;
+      socket.emit('view:subscribed', parsed);
+    });
+
+    socket.on('unsubscribe:view', () => {
+      delete socket.data.view;
+      socket.emit('view:unsubscribed');
+    });
+
     socket.on('disconnect', (reason) => {
+      delete socket.data.view;
       logger.info(`[socket] client disconnected (${socket.id}) reason=${reason}`);
     });
   });
@@ -85,6 +106,61 @@ export function initSocket(server) {
 
   logger.info('[socket] real-time server attached');
   return io;
+}
+
+/**
+ * Validate a viewport subscription payload.
+ *
+ * @param {object} view
+ * @returns {{north:number,south:number,east:number,west:number,zoom:number}|null}
+ */
+function parseView(view) {
+  const north = Number(view?.north);
+  const south = Number(view?.south);
+  const east = Number(view?.east);
+  const west = Number(view?.west);
+  if (
+    ![north, south, east, west].every(Number.isFinite) ||
+    north <= south ||
+    east <= west ||
+    north > 90 ||
+    south < -90 ||
+    east > 180 ||
+    west < -180
+  ) {
+    return null;
+  }
+  const zoom = Number.isFinite(Number(view?.zoom)) ? Number(view.zoom) : 4;
+  return { north, south, east, west, zoom };
+}
+
+/**
+ * Whether a viewport contains a point (antimeridian-ignoring, clamped).
+ *
+ * @param {{north:number,south:number,east:number,west:number}} view
+ * @param {number} lat
+ * @param {number} lon
+ * @returns {boolean}
+ */
+function viewContains(view, lat, lon) {
+  return lat <= view.north && lat >= view.south && lon >= view.west && lon <= view.east;
+}
+
+/**
+ * Forward an event to every socket whose subscribed viewport contains the
+ * point (plus the area room, delivered by the caller when needed).
+ *
+ * @param {number} lat
+ * @param {number} lon
+ * @param {string} event
+ * @param {object} payload
+ */
+function emitToViewport(lat, lon, event, payload) {
+  for (const socket of io.sockets.sockets.values()) {
+    if (socket.data?.view && viewContains(socket.data.view, lat, lon)) {
+      socket.emit(event, payload);
+    }
+  }
 }
 
 /**
@@ -99,10 +175,13 @@ function forwardPrediction({ prediction, previousRiskLevel }) {
   const key = locationKey(lat, lon);
   const room = `area:${key}`;
 
-  io.to(GLOBAL_ROOM).emit('prediction:updated', prediction);
+  // Viewport subscribers (the map) and the monitored area's subscribers.
+  emitToViewport(lat, lon, 'prediction:updated', prediction);
+  io.to(room).emit('prediction:updated', prediction);
 
   const weather = { lat, lon, weather: prediction.weather };
-  io.to(GLOBAL_ROOM).emit('weather:updated', weather);
+  emitToViewport(lat, lon, 'weather:updated', weather);
+  io.to(room).emit('weather:updated', weather);
 
   const currentRisk = prediction.riskLevel;
   if (currentRisk !== previousRiskLevel && previousRiskLevel) {
@@ -113,7 +192,7 @@ function forwardPrediction({ prediction, previousRiskLevel }) {
       currentRiskLevel: currentRisk,
       prediction,
     };
-    io.to(GLOBAL_ROOM).emit('risk:changed', riskPayload);
+    emitToViewport(lat, lon, 'risk:changed', riskPayload);
     io.to(room).emit('risk:changed', riskPayload);
   }
 
@@ -121,18 +200,14 @@ function forwardPrediction({ prediction, previousRiskLevel }) {
   const crossedUp = isActionable(currentRisk) && !isActionable(previousRiskLevel);
   const crossedDown = !isActionable(currentRisk) && isActionable(previousRiskLevel);
 
+  // Alert transitions are global: the alerts page shows them regardless
+  // of the current map viewport.
   if (crossedUp) {
     io.to(GLOBAL_ROOM).emit('alert:new', alert);
   }
   if (crossedDown) {
     io.to(GLOBAL_ROOM).emit('alert:resolved', { lat, lon, riskLevel: currentRisk });
   }
-
-  // Area-scoped subscribers get the fine-grained updates.
-  io.to(room).emit('prediction:updated', prediction);
-  io.to(room).emit('weather:updated', weather);
-  if (crossedUp) io.to(room).emit('alert:new', alert);
-  if (crossedDown) io.to(room).emit('alert:resolved', { lat, lon, riskLevel: currentRisk });
 }
 
 /**
@@ -142,7 +217,7 @@ function forwardPrediction({ prediction, previousRiskLevel }) {
  */
 function forwardWeatherRefresh({ lat, lon, weather }) {
   if (!io) return;
-  io.to(GLOBAL_ROOM).emit('weather:updated', { lat, lon, weather });
+  emitToViewport(lat, lon, 'weather:updated', { lat, lon, weather });
   io.to(`area:${locationKey(lat, lon)}`).emit('weather:updated', { lat, lon, weather });
 }
 

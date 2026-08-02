@@ -15,12 +15,33 @@ export type LocationError =
   | { code: 'timeout'; message: string }
   | { code: 'unsupported'; message: string };
 
-const DEFAULT_TIMEOUT_MS = 10000;
+const DEFAULT_TIMEOUT_MS = 15000;
 const MAX_ACCEPTABLE_ACCURACY_M = 150;
+
+export type LocationPermissionState = 'granted' | 'prompt' | 'denied' | 'unsupported';
 
 /** Whether the browser exposes the Geolocation API at all. */
 export function isGeolocationSupported(): boolean {
   return typeof navigator !== 'undefined' && 'geolocation' in navigator;
+}
+
+/**
+ * Current geolocation permission state via the Permissions API, so the UI
+ * can show a "denied" state without triggering another browser prompt.
+ * Falls back to 'unsupported' when the API is unavailable.
+ */
+export async function getPermissionState(): Promise<LocationPermissionState> {
+  if (typeof navigator === 'undefined' || !navigator.permissions?.query) {
+    return 'unsupported';
+  }
+  try {
+    const result = await navigator.permissions.query({ name: 'geolocation' });
+    if (result.state === 'granted') return 'granted';
+    if (result.state === 'denied') return 'denied';
+    return 'prompt';
+  } catch {
+    return 'unsupported';
+  }
 }
 
 function toCoordinates(position: GeolocationPosition): Coordinates {

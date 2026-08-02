@@ -24,11 +24,20 @@ export class ApiError extends Error {
  * Fetch a JSON resource with a timeout and friendly error mapping.
  *
  * @param path - API path (e.g. "/api/health")
- * @param options - fetch options
+ * @param options - fetch options; an external AbortSignal is honored
+ *        (aborting it cancels the request so a newer one can replace it)
  * @returns parsed JSON body
  */
 export async function fetchJson<T>(path: string, options: RequestInit = {}): Promise<T> {
   const controller = new AbortController();
+  const external = options.signal;
+  if (external) {
+    if (external.aborted) {
+      controller.abort();
+    } else {
+      external.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+  }
   const timer = setTimeout(() => controller.abort(), 15000);
 
   let response: Response;
@@ -80,11 +89,38 @@ export function getPrediction(lat: number, lon: number, monitor = true) {
   return fetchJson<Prediction>(`/api/predict?${params.toString()}`);
 }
 
-/** Latest prediction snapshots (map markers + initial state). */
-export function getPredictions(limit = 100) {
-  return fetchJson<{ count: number; predictions: Prediction[] }>(
-    `/api/predictions?limit=${limit}`
-  );
+/** A visible map region (leaflet bounds + zoom level). */
+export interface MapRegion {
+  north: number;
+  south: number;
+  east: number;
+  west: number;
+  zoom: number;
+}
+
+export interface RegionResponse {
+  count: number;
+  spacing: number;
+  region: MapRegion;
+  predictions: Prediction[];
+}
+
+/**
+ * Predictions for a visible map region only.
+ *
+ * The backend computes a zoom-dependent grid inside these bounds — it
+ * never returns the whole world. Pass an AbortSignal so a newer viewport
+ * request can cancel an older, slower one.
+ */
+export function getPredictionsInBounds(region: MapRegion, signal?: AbortSignal) {
+  const params = new URLSearchParams({
+    north: String(region.north),
+    south: String(region.south),
+    east: String(region.east),
+    west: String(region.west),
+    z: String(region.zoom),
+  });
+  return fetchJson<RegionResponse>(`/api/predictions?${params.toString()}`, { signal });
 }
 
 /** Place-name search for the map search bar. */

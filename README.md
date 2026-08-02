@@ -90,6 +90,25 @@ Latest prediction snapshot per location (newest first), persisted whenever a
 prediction is computed (API requests and background jobs). Drives the map
 markers and the global predictions list.
 
+### `GET /api/predictions?north=..&south=..&east=..&west=..&z=..`
+
+Computes a grid of predictions for a visible map viewport (bounds in degrees,
+`z` = map zoom). Only **land** cells are computed — ocean, lakes and polar
+ice are skipped — and the grid spacing scales with the zoom level so the
+cell count stays bounded:
+
+| Zoom  | Spacing |
+|-------|---------|
+| ≤ 4   | 0.25°   |
+| 5–8   | 0.10°   |
+| 9–12  | 0.02°   |
+| 13+   | 0.01°   |
+
+Results are cached per zoom + quantized bounds (10 min TTL); weather is
+fetched in batches through the provider. The response includes `count`,
+`spacing` and the `predictions` array. Real-time updates for the visible
+viewport arrive over the socket via `subscribe:view` (see below).
+
 ### `GET /api/alerts?lat=..&lon=..&radiusKm=600`
 
 Derives the alert lists from the persisted snapshots:
@@ -126,22 +145,29 @@ search bar). Returns up to `limit` (max 10) candidates with coordinates:
 ## Real-time updates (Socket.IO)
 
 Clients connect to `/socket.io`, join the `global` room automatically, and
-may subscribe to a monitored area with:
+may subscribe to a monitored area or to a map viewport:
 
-| Direction | Event            | Payload                                        |
-| --------- | ---------------- | ---------------------------------------------- |
-| client →  | `monitor:area`   | `{ lat, lon }`                                 |
-| client →  | `unmonitor`      | —                                              |
-| server →  | `area:monitored` | `{ key, lat, lon }`                            |
-| server →  | `prediction:updated` | full prediction payload                     |
-| server →  | `weather:updated`| `{ lat, lon, weather }`                        |
-| server →  | `risk:changed`   | `{ lat, lon, previousRiskLevel, currentRiskLevel, prediction }` |
-| server →  | `alert:new`      | alert-shaped prediction                        |
-| server →  | `alert:resolved` | `{ lat, lon, riskLevel }`                      |
+| Direction | Event              | Payload                                            |
+| --------- | ------------------ | -------------------------------------------------- |
+| client →  | `monitor:area`     | `{ lat, lon }`                                     |
+| client →  | `unmonitor`        | —                                                  |
+| client →  | `subscribe:view`   | `{ north, south, east, west, zoom }`               |
+| client →  | `unsubscribe:view` | —                                                  |
+| server →  | `area:monitored`   | `{ key, lat, lon }`                                |
+| server →  | `view:subscribed`  | the parsed viewport                                |
+| server →  | `view:unsubscribed`| —                                                  |
+| server →  | `prediction:updated` | full prediction payload                          |
+| server →  | `weather:updated`  | `{ lat, lon, weather }`                            |
+| server →  | `risk:changed`     | `{ lat, lon, previousRiskLevel, currentRiskLevel, prediction }` |
+| server →  | `alert:new`        | alert-shaped prediction                             |
+| server →  | `alert:resolved`   | `{ lat, lon, riskLevel }`                          |
 
 Events are emitted whenever a prediction is computed (API or background
-jobs); area-scoped events are additionally delivered to the corresponding
-`area:<lat,lon>` room.
+jobs). `prediction:updated` / `weather:updated` / `risk:changed` are
+viewport-scoped: they only reach clients whose subscribed viewport (or
+`area:<lat,lon>` room) contains the location — a viewport subscription is
+re-applied automatically after a reconnect. `alert:new` / `alert:resolved`
+are global and fire only when a location crosses the alert risk threshold.
 
 ## Frontend
 

@@ -72,6 +72,44 @@ export class WeatherService {
   }
 
   /**
+   * Fetch (and cache) weather for many coordinates with a minimum of
+   * provider requests: cache hits are served directly, only the missing
+   * points are fetched through the provider's batch endpoint.
+   *
+   * @param {Array<{lat: number, lon: number}>} points
+   * @returns {Promise<Map<string, object>>} weather by `lat,lon` key
+   */
+  async getWeatherBatch(points) {
+    const results = new Map();
+    const misses = [];
+
+    for (const { lat, lon } of points) {
+      const { lat: rLat, lon: rLon } = normalizeCoordinates(lat, lon);
+      const key = locationKey(rLat, rLon);
+      const cached = this.cache.get(key);
+      if (cached !== undefined) {
+        results.set(key, { ...cached, cached: true });
+      } else {
+        misses.push({ lat: rLat, lon: rLon, key });
+      }
+    }
+
+    if (misses.length > 0) {
+      const fetched = await this.provider.getWeatherBatch(
+        misses.map(({ lat, lon }) => ({ lat, lon }))
+      );
+      for (const { key } of misses) {
+        const weather = fetched.get(key);
+        if (!weather) continue;
+        this.cache.set(key, weather);
+        results.set(key, { ...weather, cached: false });
+      }
+    }
+
+    return results;
+  }
+
+  /**
    * Remove the cached payload for a coordinate.
    *
    * @param {number} lat

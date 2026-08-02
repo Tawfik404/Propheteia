@@ -75,6 +75,79 @@ export class OpenMeteoProvider {
   }
 
   /**
+   * Fetch current weather for many coordinates in batched requests.
+   *
+   * Open-Meteo accepts repeated `latitude`/`longitude` parameters and
+   * answers with one full response per location. Points are chunked (one
+   * HTTP request per chunk, executed sequentially) to stay well below the
+   * provider's request limit.
+   *
+   * @param {Array<{lat: number, lon: number}>} points
+   * @returns {Promise<Map<string, object>>} normalized weather by `lat,lon` key
+   * @throws {ExternalServiceError} on provider/network failures
+   */
+  async getWeatherBatch(points, { chunkSize = 250 } = {}) {
+    const results = new Map();
+    for (let i = 0; i < points.length; i += chunkSize) {
+      const chunk = points.slice(i, i + chunkSize);
+      const startedAt = Date.now();
+      let response;
+      try {
+        const params = [];
+        for (const { lat, lon } of chunk) {
+          params.push(`latitude=${lat}&longitude=${lon}`);
+        }
+        response = await this.client.get(`/v1/forecast?${params.join('&')}`, {
+          params: {
+            current:
+              'temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation,weather_code',
+            daily: 'precipitation_sum',
+            timezone: 'auto',
+            wind_speed_unit: 'kmh',
+            forecast_days: 1,
+          },
+        });
+      } catch (err) {
+        const durationMs = Date.now() - startedAt;
+        if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') {
+          logger.error(`[weather] open-meteo batch request timed out (${durationMs}ms)`);
+          throw new GatewayTimeoutError('Weather service request timed out');
+        }
+        const status = err.response?.status;
+        logger.error(
+          `[weather] open-meteo batch request failed (${durationMs}ms) status=${status ?? 'network'}`
+        );
+        throw new ExternalServiceError('Weather service unavailable', {
+          provider: 'open-meteo',
+          status,
+          durationMs,
+        });
+      }
+
+      const durationMs = Date.now() - startedAt;
+      logger.info(`[weather] open-meteo batch completed (${durationMs}ms)`, {
+        points: chunk.length,
+      });
+
+      const entries = Array.isArray(response.data) ? response.data : [];
+      for (let index = 0; index < chunk.length && index < entries.length; index += 1) {
+        const { lat, lon } = chunk[index];
+        try {
+          results.set(this.locationKey(lat, lon), this.normalize(entries[index]));
+        } catch {
+          // skip a malformed entry; the caller falls back to per-point fetch
+        }
+      }
+    }
+    return results;
+  }
+
+  /** Stable cache key matching the weather service (4-decimal rounding). */
+  locationKey(lat, lon) {
+    return `${lat.toFixed(4)},${lon.toFixed(4)}`;
+  }
+
+  /**
    * Map the raw Open-Meteo payload onto the internal weather shape shared
    * by every provider.
    *

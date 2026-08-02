@@ -1,6 +1,7 @@
 import { weatherService } from '../weather/weather.service.js';
 import { fwiService } from '../fwi/fwi.service.js';
 import { mapFwiToRisk } from '../alerts/risk.mapper.js';
+import { composePrediction } from './payload.js';
 import FwiStateStore from '../../db/fwiStateStore.js';
 import LocationStore from '../../db/locationStore.js';
 import PredictionStore from '../../db/predictionStore.js';
@@ -92,39 +93,16 @@ export class PredictionService {
 
     const name = this.locationName(rLat, rLon);
 
-    const prediction = {
-      latitude: rLat,
-      longitude: rLon,
-      predictedAt: new Date().toISOString(),
+    const prediction = composePrediction({
+      lat: rLat,
+      lon: rLon,
+      weather,
+      indices,
+      risk,
+      date,
+      previous,
       name,
-      weather: {
-        temperature: weather.temperature,
-        humidity: weather.humidity,
-        windSpeed: weather.windSpeed,
-        precipitation: weather.precipitation,
-        rainfall24h: weather.rainfall24h,
-        weatherCode: weather.weatherCode,
-        observedAt: weather.observedAt,
-        provider: weather.provider,
-        cached: weather.cached,
-      },
-      indices: {
-        FFMC: Number(indices.ffmc.toFixed(1)),
-        DMC: Number(indices.dmc.toFixed(1)),
-        DC: Number(indices.dc.toFixed(1)),
-        ISI: Number(indices.isi.toFixed(1)),
-        BUI: Number(indices.bui.toFixed(1)),
-        FWI: risk.fwi,
-        DSR: Number(indices.dsr.toFixed(2)),
-      },
-      riskLevel: risk.riskLevel,
-      fireProbability: risk.fireProbability,
-      state: {
-        date,
-        previousDate: previous.date,
-        usedStartupValues: previous.date === null,
-      },
-    };
+    });
 
     // Persist the snapshot so REST endpoints can serve it without
     // recomputing, then notify real-time subscribers. The previous risk

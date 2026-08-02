@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useState,
@@ -9,6 +10,14 @@ import type { Socket } from 'socket.io-client';
 import type { SocketStatus } from '../types';
 import { socketClient } from '../services/socket';
 
+interface MapView {
+  north: number;
+  south: number;
+  east: number;
+  west: number;
+  zoom: number;
+}
+
 interface SocketContextType {
   status: SocketStatus;
   socket: Socket | null;
@@ -16,6 +25,10 @@ interface SocketContextType {
   setMonitoredArea: (lat: number, lon: number) => void;
   /** Leave all monitored areas. */
   clearMonitoredArea: () => void;
+  /** Subscribe to updates for the visible map viewport. */
+  subscribeView: (view: MapView) => void;
+  /** Stop receiving viewport-scoped updates. */
+  unsubscribeView: () => void;
 }
 
 const SocketContext = createContext<SocketContextType | undefined>(undefined);
@@ -32,16 +45,26 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const setMonitoredArea = (lat: number, lon: number) => {
+  const setMonitoredArea = useCallback((lat: number, lon: number) => {
     socketClient.setMonitoredArea(lat, lon);
-  };
+  }, []);
 
-  const clearMonitoredArea = () => {
+  const clearMonitoredArea = useCallback(() => {
     socketClient.clearMonitoredArea();
-  };
+  }, []);
+
+  const subscribeView = useCallback((view: MapView) => {
+    socketClient.subscribeView(view);
+  }, []);
+
+  const unsubscribeView = useCallback(() => {
+    socketClient.unsubscribeView();
+  }, []);
 
   return (
-    <SocketContext.Provider value={{ status, socket, setMonitoredArea, clearMonitoredArea }}>
+    <SocketContext.Provider
+      value={{ status, socket, setMonitoredArea, clearMonitoredArea, subscribeView, unsubscribeView }}
+    >
       {children}
     </SocketContext.Provider>
   );

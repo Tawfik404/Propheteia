@@ -4,6 +4,7 @@ import { useSettings } from '../context/SettingsContext';
 import {
   distanceKm,
   getCurrentPosition,
+  getPermissionState,
   type Coordinates,
   type LocationError,
 } from '../services/location';
@@ -16,15 +17,24 @@ export interface LocationState {
 
 const IDLE: LocationState = { status: 'idle', coords: null, error: null };
 
+const DENIED_ERROR: LocationError = {
+  code: 'denied',
+  message:
+    'Location access was denied. Enable it in your browser settings to see nearby risks.',
+};
+
 /**
  * Geolocation hook.
  *
  * - Reads the persisted "location access" preference.
+ * - Pre-checks the Permissions API so a denied state is shown without
+ *   re-prompting the user.
  * - When enabled, resolves the user's position once and re-resolves when
- *   the user moves more than `moveThresholdKm` from the last fix.
+ *   the user moves more than `moveThresholdKm` from the last fix
+ *   (default 100 m — fine-grained movement tracking).
  * - Reports friendly, categorized errors (denied / unavailable / timeout).
  */
-export function useLocation(moveThresholdKm = 25) {
+export function useLocation(moveThresholdKm = 0.1) {
   const { settings, enableLocation, disableLocation } = useSettings();
   const [state, setState] = useState<LocationState>(IDLE);
   const coordsRef = useRef<Coordinates | null>(null);
@@ -58,7 +68,17 @@ export function useLocation(moveThresholdKm = 25) {
     }
     // Deferred so the status transition happens in a callback, not
     // synchronously inside the effect body.
-    const initial = window.setTimeout(() => void resolve(), 0);
+    const initial = window.setTimeout(() => {
+      void (async () => {
+        // Avoid re-prompting when the browser already knows the answer.
+        const permission = await getPermissionState();
+        if (permission === 'denied') {
+          setState({ status: 'denied', coords: null, error: DENIED_ERROR });
+          return;
+        }
+        void resolve();
+      })();
+    }, 0);
     const timer = window.setInterval(() => {
       if (coordsRef.current) {
         void resolve();

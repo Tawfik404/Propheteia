@@ -30,6 +30,8 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "node-cron": "^3.0.3",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2"
   }
 }

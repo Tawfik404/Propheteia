@@ -79,6 +79,36 @@ export class PredictionStore {
   }
 
   /**
+   * Trim the store to the newest `maxRows` predictions.
+   *
+   * The viewport grid engine upserts many cells per request; this keeps
+   * the table (and therefore the alerts lists) bounded.
+   *
+   * @param {number} [maxRows=3000]
+   * @returns {number} number of deleted rows
+   */
+  prune(maxRows = 3000) {
+    const stale = this.db
+      .prepare(
+        `SELECT location_key
+           FROM predictions
+          ORDER BY predicted_at DESC
+          LIMIT -1 OFFSET ?`
+      )
+      .all(maxRows);
+
+    if (stale.length === 0) return 0;
+
+    const deleteStmt = this.db.prepare('DELETE FROM predictions WHERE location_key = ?');
+    const remove = this.db.transaction(() => {
+      for (const row of stale) deleteStmt.run(row.location_key);
+      return stale.length;
+    });
+
+    return remove();
+  }
+
+  /**
    * Latest prediction for a single location.
    *
    * @param {number} lat

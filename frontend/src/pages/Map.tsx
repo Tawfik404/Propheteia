@@ -3,6 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import { LocateFixed, MapPin, WifiOff } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import 'leaflet.markercluster';
+import 'leaflet.markercluster/dist/MarkerCluster.css';
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import MapLegend from '../components/MapLegend';
 import MapInfoPanel from '../components/MapInfoPanel';
 import MapSearchBar from '../components/MapSearchBar';
@@ -18,6 +21,10 @@ import type { Prediction } from '../types';
 const DEFAULT_CENTER: [number, number] = [40, 0];
 const DEFAULT_ZOOM = 2;
 const USER_ZOOM = 6;
+/** Pause after the map stops moving before requesting the new viewport. */
+const MOVEEND_DEBOUNCE_MS = 400;
+/** Individual markers below this zoom; clustered above it. */
+const CLUSTER_DISABLE_ZOOM = 11;
 
 function formatTime(iso: string): string {
   const date = new Date(iso);
@@ -30,11 +37,18 @@ function formatTime(iso: string): string {
   });
 }
 
+function titleFor(prediction: Prediction): string {
+  return (
+    prediction.name ??
+    `${prediction.latitude.toFixed(2)}, ${prediction.longitude.toFixed(2)}`
+  );
+}
+
 function popupHtml(prediction: Prediction): string {
   const { fireProbability, riskLevel, indices, weather } = prediction;
   const lines = [
     `<div class="marker-popup">`,
-    `<div class="marker-popup-title">${prediction.name ?? 'Location'}</div>`,
+    `<div class="marker-popup-title">${titleFor(prediction)}</div>`,
     `<div class="marker-popup-risk" style="color:${riskColors[riskLevel]}">${riskLevel} Risk · ${fireProbability}%</div>`,
     `<div class="marker-popup-row"><span>Fire Probability</span><b>${fireProbability}%</b></div>`,
     `<div class="marker-popup-row"><span>FWI</span><b>${indices.FWI}</b></div>`,
@@ -50,47 +64,21 @@ function popupHtml(prediction: Prediction): string {
 export default function MapPage() {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
+  const clusterRef = useRef<L.MarkerClusterGroup | null>(null);
   const layersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const pulseTimersRef = useRef<Map<string, number>>(new Map());
+  const moveTimerRef = useRef<number | null>(null);
   const gpsHandledRef = useRef<string | null>(null);
   const searchHandledRef = useRef(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const { list, byKey, upsert, loading, error } = usePredictions();
-  const { setMonitoredArea } = useSocket();
+  const { list, byKey, upsert, loading, error, loadRegion } = usePredictions();
+  const { setMonitoredArea, subscribeView, unsubscribeView } = useSocket();
   const location = useLocation();
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
-
-  // Center the map on a coordinate, subscribe to its live updates and make
-  // sure a prediction exists for it (fetching one on demand if needed).
-  const focusArea = useCallback(
-    async (lat: number, lon: number) => {
-      const { lat: rLat, lon: rLon } = normalizeCoords(lat, lon);
-      setFetchError(null);
-      setMonitoredArea(rLat, rLon);
-      const map = mapRef.current;
-      if (map) {
-        map.flyTo([rLat, rLon], USER_ZOOM, { duration: 1.2 });
-      }
-
-      const key = locationKey(rLat, rLon);
-      setSelectedKey(key);
-      if (byKey.has(key)) return;
-
-      try {
-        const prediction = await getPrediction(rLat, rLon, true);
-        upsert(prediction);
-      } catch (err) {
-        setFetchError(
-          err instanceof ApiError ? err.message : 'Could not fetch prediction for this area.'
-        );
-      }
-    },
-    [setMonitoredArea, byKey, upsert]
-  );
 
   const userKey = useMemo(
     () => (location.coords ? locationKey(location.coords.lat, location.coords.lon) : null),
@@ -111,7 +99,7 @@ export default function MapPage() {
     const prediction = byKey.get(effectiveKey);
     if (!prediction) return null;
     return {
-      location: prediction.name ?? 'Unknown area',
+      location: titleFor(prediction),
       riskLevel: prediction.riskLevel,
       probability: prediction.fireProbability,
       fwi: prediction.indices.FWI,
@@ -121,6 +109,55 @@ export default function MapPage() {
       lastUpdated: prediction.predictedAt,
     };
   }, [effectiveKey, byKey]);
+
+  // Load the visible region (predictions + socket subscription) after a
+  // short pause, so continuous panning does not spam the backend.
+  const scheduleRegionLoad = useCallback(() => {
+    if (moveTimerRef.current !== null) window.clearTimeout(moveTimerRef.current);
+    moveTimerRef.current = window.setTimeout(() => {
+      moveTimerRef.current = null;
+      const map = mapRef.current;
+      if (!map) return;
+      const bounds = map.getBounds();
+      const region = {
+        north: bounds.getNorth(),
+        south: bounds.getSouth(),
+        east: bounds.getEast(),
+        west: bounds.getWest(),
+        zoom: map.getZoom(),
+      };
+      loadRegion(region);
+      subscribeView(region);
+    }, MOVEEND_DEBOUNCE_MS);
+  }, [loadRegion, subscribeView]);
+
+  // Center on a coordinate, subscribe to its live updates and make sure a
+  // prediction exists for it (fetching one on demand if needed).
+  const focusArea = useCallback(
+    async (lat: number, lon: number) => {
+      const { lat: rLat, lon: rLon } = normalizeCoords(lat, lon);
+      setFetchError(null);
+      setMonitoredArea(rLat, rLon);
+      const map = mapRef.current;
+      if (map) {
+        map.flyTo([rLat, rLon], USER_ZOOM, { duration: 1.2 });
+      }
+
+      const key = locationKey(rLat, rLon);
+      setSelectedKey(key);
+      if (byKey.has(key)) return;
+
+      try {
+        const prediction = await getPrediction(rLat, rLon, true);
+        upsert(prediction, true);
+      } catch (err) {
+        setFetchError(
+          err instanceof ApiError ? err.message : 'Could not fetch prediction for this area.'
+        );
+      }
+    },
+    [setMonitoredArea, byKey, upsert]
+  );
 
   // Init the map once.
   useEffect(() => {
@@ -137,22 +174,45 @@ export default function MapPage() {
       }).addTo(map);
 
       L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+      // All prediction markers live in one cluster group; individual
+      // markers only appear at higher zoom levels.
+      const cluster = L.markerClusterGroup({
+        maxClusterRadius: 55,
+        showCoverageOnHover: false,
+        spiderfyOnMaxZoom: false,
+        disableClusteringAtZoom: CLUSTER_DISABLE_ZOOM,
+        chunkedLoading: true,
+        chunkInterval: 40,
+      });
+      cluster.addTo(map);
+      clusterRef.current = cluster;
+
+      map.on('moveend', scheduleRegionLoad);
+
       mapRef.current = map;
+      // Initial viewport load (the map does not fire moveend on boot).
+      window.setTimeout(scheduleRegionLoad, 0);
     }
 
     return () => {
+      if (moveTimerRef.current !== null) window.clearTimeout(moveTimerRef.current);
+      unsubscribeView();
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
+        clusterRef.current = null;
         layers.clear();
       }
     };
-  }, []);
+  }, [scheduleRegionLoad, unsubscribeView]);
 
   // Sync markers with the live prediction store — in place, no reload.
+  // Markers are added/updated/removed individually inside the cluster
+  // group, so Leaflet re-clusters instead of redrawing the whole map.
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
+    const cluster = clusterRef.current;
+    if (!cluster) return;
 
     const seen = new Set<string>();
 
@@ -172,9 +232,9 @@ export default function MapPage() {
           opacity: 1,
           fillOpacity: 0.85,
         })
-          .bindPopup(popupHtml(prediction))
-          .addTo(map);
+          .bindPopup(popupHtml(prediction));
         layer.on('click', () => setSelectedKey(key));
+        cluster.addLayer(layer);
         layersRef.current.set(key, layer);
       } else {
         const changed =
@@ -200,10 +260,10 @@ export default function MapPage() {
       }
     }
 
-    // Remove markers that no longer exist.
+    // Remove markers that no longer exist (region cache eviction, etc.).
     for (const [key, layer] of layersRef.current) {
       if (!seen.has(key)) {
-        map.removeLayer(layer);
+        cluster.removeLayer(layer);
         layersRef.current.delete(key);
       }
     }

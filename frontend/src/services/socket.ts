@@ -13,6 +13,13 @@ export class SocketClient {
   private socket: Socket | null = null;
   private listeners = new Set<(status: SocketStatus) => void>();
   private status: SocketStatus = 'connecting';
+  private lastView: {
+    north: number;
+    south: number;
+    east: number;
+    west: number;
+    zoom: number;
+  } | null = null;
 
   /** Connect once; returns the shared socket instance. */
   connect(): Socket {
@@ -28,7 +35,11 @@ export class SocketClient {
       timeout: 10000,
     });
 
-    socket.on('connect', () => this.setStatus('connected'));
+    socket.on('connect', () => {
+      this.setStatus('connected');
+      // Re-apply the latest viewport subscription after a reconnect.
+      if (this.lastView) socket.emit('subscribe:view', this.lastView);
+    });
     socket.on('disconnect', (reason) => {
       this.setStatus(reason === 'io client disconnect' ? 'offline' : 'reconnecting');
     });
@@ -62,6 +73,26 @@ export class SocketClient {
     this.socket.emit('unmonitor');
   }
 
+  /** Subscribe to real-time updates for the visible map viewport. */
+  subscribeView(view: {
+    north: number;
+    south: number;
+    east: number;
+    west: number;
+    zoom: number;
+  }) {
+    this.lastView = view;
+    if (!this.socket?.connected) return;
+    this.socket.emit('subscribe:view', view);
+  }
+
+  /** Stop receiving viewport-scoped updates. */
+  unsubscribeView() {
+    this.lastView = null;
+    if (!this.socket?.connected) return;
+    this.socket.emit('unsubscribe:view');
+  }
+
   /** Listen for connection status changes. Returns an unsubscribe fn. */
   onStatusChange(callback: (status: SocketStatus) => void): () => void {
     this.listeners.add(callback);
@@ -70,6 +101,7 @@ export class SocketClient {
 
   /** Explicitly disconnect (app teardown). */
   disconnect() {
+    this.lastView = null;
     this.socket?.disconnect();
     this.socket = null;
     this.setStatus('offline');
