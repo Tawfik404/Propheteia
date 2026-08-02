@@ -15,3 +15,6 @@ Thumbs.db
 # Editors
 .vscode/
 .idea/
+
+# Playwright MCP artifacts
+.playwright-mcp/
