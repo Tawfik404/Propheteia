@@ -103,6 +103,7 @@ export function initSocket(server) {
 
   eventBus.on('prediction:computed', forwardPrediction);
   eventBus.on('weather:refreshed', forwardWeatherRefresh);
+  eventBus.on('prediction:renamed', forwardRename);
 
   logger.info('[socket] real-time server attached');
   return io;
@@ -222,6 +223,22 @@ function forwardWeatherRefresh({ lat, lon, weather }) {
 }
 
 /**
+ * Forward a reverse-geocoded name to clients looking at that point.
+ *
+ * Names resolve asynchronously after a prediction is computed, so this
+ * lets open markers/info panels upgrade from "lat, lon" to a real place
+ * name without waiting for the next region refresh.
+ *
+ * @param {object} payload - { lat, lon, name }
+ */
+function forwardRename({ lat, lon, name }) {
+  if (!io) return;
+  const payload = { lat, lon, name };
+  emitToViewport(lat, lon, 'prediction:renamed', payload);
+  io.to(`area:${locationKey(lat, lon)}`).emit('prediction:renamed', payload);
+}
+
+/**
  * Whether a risk level qualifies as an actionable alert.
  *
  * @param {string} [riskLevel]
@@ -261,6 +278,7 @@ export function closeSocket() {
   if (!io) return;
   eventBus.off('prediction:computed', forwardPrediction);
   eventBus.off('weather:refreshed', forwardWeatherRefresh);
+  eventBus.off('prediction:renamed', forwardRename);
   io.close();
   io = null;
   logger.info('[socket] real-time server closed');

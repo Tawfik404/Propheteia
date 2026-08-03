@@ -137,6 +137,43 @@ export const GRID_PERSIST_MIN_RISK = 'Moderate';
 /** Row cap for the persisted prediction store (newest kept). */
 export const PREDICTION_STORE_MAX_ROWS = 3000;
 
+/**
+ * Maximum deterministic in-cell offset for grid points, as a fraction of
+ * the cell spacing. Points stay strictly inside their own cell (never
+ * reach the boundary) so the displayed prediction dots do not line up in
+ * perfect rows/columns while remaining stable between refreshes.
+ */
+export const GRID_POINT_JITTER_FRACTION = 0.4;
+
+/**
+ * Reverse-geocoding cache lifetime in days. Place names change rarely,
+ * so a long TTL is safe and keeps provider load low.
+ */
+export const NAMING_CACHE_TTL_DAYS = 90;
+
+/**
+ * How many reverse-geocode lookups may resolve inline (awaiting the grid
+ * response) before the rest are deferred to the background queue. The
+ * inline phase is additionally time-bounded (see LocationNamingService),
+ * so prediction computation never stalls on naming.
+ */
+export const NAMING_BATCH_CAP = 250;
+
+/** Concurrent background reverse-geocode requests (rate-limit politeness). */
+export const NAMING_CONCURRENCY = 2;
+
+/** Minimum spacing between background reverse-geocode request starts (ms). */
+export const NAMING_REQUEST_INTERVAL_MS = 500;
+
+/** Background retry backoff base (ms); attempt n waits base * 2^(n-1). */
+export const NAMING_RETRY_BASE_MS = 60_000;
+
+/** Max reverse-geocode retries per coordinate before giving up. */
+export const NAMING_MAX_ATTEMPTS = 6;
+
+/** Upper bound on queued background lookups (drop beyond this). */
+export const NAMING_QUEUE_LIMIT = 2000;
+
 /** Open-Meteo variables required for the FWI System. */
 export const OPEN_METEO_REQUIRED_FIELDS = Object.freeze([
   'temperature_2m',

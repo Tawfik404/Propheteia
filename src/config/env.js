@@ -45,6 +45,17 @@ export const env = {
   geocodingBaseUrl: process.env.GEOCODING_BASE_URL || 'https://geocoding-api.open-meteo.com',
   geocodingTimeoutMs: parseInteger(process.env.GEOCODING_TIMEOUT_MS, 6000),
 
+  /** Photon reverse geocoding provider */
+  reverseGeocodeBaseUrl: process.env.REVERSE_GEOCODE_BASE_URL || 'https://photon.komoot.io',
+  reverseGeocodeTimeoutMs: parseInteger(process.env.REVERSE_GEOCODE_TIMEOUT_MS, 8000),
+
+  /** Nominatim reverse geocoding fallback provider */
+  nominatimBaseUrl: process.env.NOMINATIM_BASE_URL || 'https://nominatim.openstreetmap.org',
+  nominatimTimeoutMs: parseInteger(process.env.NOMINATIM_TIMEOUT_MS, 8000),
+  nominatimUserAgent:
+    process.env.NOMINATIM_USER_AGENT ||
+    'propheteia-backend/1.0 (wildfire-risk monitoring; https://github.com/Tawfik404/Propheteia)',
+
   /** Background jobs */
   jobsEnabled: parseBoolean(process.env.JOBS_ENABLED, true),
 

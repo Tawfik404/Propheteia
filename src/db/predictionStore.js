@@ -127,6 +127,44 @@ export class PredictionStore {
   }
 
   /**
+   * Update the display name of a persisted prediction.
+   *
+   * Called when reverse geocoding resolves a name asynchronously after
+   * the prediction was already stored with a null/fallback name.
+   *
+   * @param {number} lat
+   * @param {number} lon
+   * @param {string} name
+   * @returns {number} number of updated rows
+   */
+  updateName(lat, lon, name) {
+    return this.db
+      .prepare('UPDATE predictions SET name = ? WHERE location_key = ?')
+      .run(name, locationKey(lat, lon)).changes;
+  }
+
+  /**
+   * Persisted predictions that still have no location name.
+   *
+   * Used by the naming service to back-fill names for rows computed
+   * before reverse geocoding existed (or whose lookups failed).
+   *
+   * @param {number} [limit=500]
+   * @returns {Array<{location_key:string, lat:number, lon:number}>}
+   */
+  unnamed(limit = 500) {
+    return this.db
+      .prepare(
+        `SELECT location_key, lat, lon
+           FROM predictions
+          WHERE name IS NULL
+          ORDER BY predicted_at DESC
+          LIMIT ?`
+      )
+      .all(limit);
+  }
+
+  /**
    * Rebuild a prediction payload from a stored row.
    *
    * @param {object} row

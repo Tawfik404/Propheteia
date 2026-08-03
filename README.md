@@ -94,7 +94,8 @@ markers and the global predictions list.
 
 Computes a grid of predictions for a visible map viewport (bounds in degrees,
 `z` = map zoom). Only **land** cells are computed — ocean, lakes and polar
-ice are skipped — and the grid spacing scales with the zoom level so the
+ice are skipped (and prediction points are snapped to land inside their
+cell) — and the grid spacing scales with the zoom level so the
 cell count stays bounded:
 
 | Zoom  | Spacing |
@@ -108,6 +109,19 @@ Results are cached per zoom + quantized bounds (10 min TTL); weather is
 fetched in batches through the provider. The response includes `count`,
 `spacing` and the `predictions` array. Real-time updates for the visible
 viewport arrive over the socket via `subscribe:view` (see below).
+
+Prediction points are placed deterministically *inside* each grid cell
+(a small pseudo-random offset derived from the cell's lattice indices),
+so markers never line up in perfect rows/columns yet stay stable between
+refreshes; points that would land on water fall back to the cell center.
+
+Every prediction carries a human-readable location name ("In Agadir",
+"Near Ifrane", "Near Teton") resolved by the reverse-geocoding pipeline
+(Photon, with Nominatim as fallback when Photon has no data). Lookups
+run asynchronously with a bounded inline budget, are cached in SQLite
+(`geocode_cache` table) and queued in the background for the rest; when
+a name resolves after the prediction was served, live clients receive a
+`prediction:renamed` socket event.
 
 Very low zooms (the whole world) are never computed: the backend refuses
 regions that would still exceed the cell cap after coarsening, and the map

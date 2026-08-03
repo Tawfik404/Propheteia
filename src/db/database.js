@@ -62,6 +62,15 @@ CREATE TABLE IF NOT EXISTS predictions (
 
 CREATE INDEX IF NOT EXISTS idx_predictions_predicted_at
   ON predictions (predicted_at DESC);
+
+CREATE TABLE IF NOT EXISTS geocode_cache (
+  location_key TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  resolved_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_geocode_cache_resolved_at
+  ON geocode_cache (resolved_at DESC);
 `;
 
 /**

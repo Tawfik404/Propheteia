@@ -188,8 +188,21 @@ export function usePredictions(): PredictionsState {
   useEffect(() => {
     if (!socket) return;
     socket.on('prediction:updated', (prediction: Prediction) => upsert(prediction));
+    socket.on(
+      'prediction:renamed',
+      (payload: { lat: number; lon: number; name: string }) => {
+        const key = locationKey(payload.lat, payload.lon);
+        const current = byKeyRef.current.get(key);
+        if (!current || current.name === payload.name) return;
+        const next = new Map(byKeyRef.current);
+        next.set(key, { ...current, name: payload.name });
+        byKeyRef.current = next;
+        setByKey(next);
+      }
+    );
     return () => {
       socket.off('prediction:updated', upsert);
+      socket.off('prediction:renamed');
     };
   }, [socket, upsert]);
 

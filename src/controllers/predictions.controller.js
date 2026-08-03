@@ -2,6 +2,23 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { validateCoordinates } from '../utils/geo.js';
 import PredictionStore from '../db/predictionStore.js';
 import { gridService } from '../services/grid/grid.service.js';
+import { namingService } from '../services/geocode/locationNaming.service.js';
+
+/**
+ * Fill in any names that reverse geocoding resolved after the payload was
+ * built or cached (cached payloads / persisted rows may carry null
+ * names). Lookups are synchronous cache reads — never a provider request.
+ *
+ * @param {Array<object>} predictions
+ */
+function overlayNames(predictions) {
+  for (const prediction of predictions) {
+    if (!prediction.name) {
+      const name = namingService.nameFor(prediction.latitude, prediction.longitude);
+      if (name) prediction.name = name;
+    }
+  }
+}
 
 /**
  * GET /api/predictions
@@ -38,6 +55,7 @@ export const listPredictions = asyncHandler(async (req, res) => {
 
     const zoom = Number.isFinite(Number(req.query.z)) ? Number(req.query.z) : 4;
     const result = await gridService.computeRegion({ north, south, east, west, zoom });
+    overlayNames(result.predictions);
     res.json(result);
     return;
   }
@@ -47,12 +65,15 @@ export const listPredictions = asyncHandler(async (req, res) => {
   if (req.query.lat !== undefined || req.query.lon !== undefined) {
     const { lat, lon } = validateCoordinates(req.query.lat, req.query.lon);
     const prediction = store.get(lat, lon);
-    res.json({ count: prediction ? 1 : 0, predictions: prediction ? [prediction] : [] });
+    const predictions = prediction ? [prediction] : [];
+    overlayNames(predictions);
+    res.json({ count: predictions.length, predictions });
     return;
   }
 
   const limit = Math.min(Number.parseInt(req.query.limit, 10) || 50, 200);
   const predictions = store.recent(limit);
+  overlayNames(predictions);
 
   res.json({ count: predictions.length, predictions });
 });

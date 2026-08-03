@@ -1,6 +1,7 @@
 import { weatherService } from '../weather/weather.service.js';
 import { fwiService } from '../fwi/fwi.service.js';
 import { mapFwiToRisk } from '../alerts/risk.mapper.js';
+import { namingService } from '../geocode/locationNaming.service.js';
 import { composePrediction } from './payload.js';
 import FwiStateStore from '../../db/fwiStateStore.js';
 import LocationStore from '../../db/locationStore.js';
@@ -31,12 +32,14 @@ export class PredictionService {
   constructor({
     weather = weatherService,
     fwi = fwiService,
+    names = namingService,
     stateStore = new FwiStateStore(),
     locationStore = new LocationStore(),
     predictionStore = new PredictionStore(),
   } = {}) {
     this.weather = weather;
     this.fwi = fwi;
+    this.names = names;
     this.stateStore = stateStore;
     this.locationStore = locationStore;
     this.predictionStore = predictionStore;
@@ -58,7 +61,12 @@ export class PredictionService {
 
     const startedAt = Date.now();
 
-    // 1. Weather (cached upstream).
+    // 1. Weather (cached upstream), with reverse-geocoded naming running
+    //    in parallel so the point gets a readable name without slowing
+    //    the prediction (both resolve in the same request).
+    const namePromise = this.names.resolveMany([{ lat: rLat, lon: rLon }], {
+      timeBudgetMs: 4000,
+    });
     const weather = await this.weather.getWeather(rLat, rLon);
 
     if (
@@ -91,7 +99,11 @@ export class PredictionService {
       this.locationStore.register(rLat, rLon);
     }
 
-    const name = this.locationName(rLat, rLon);
+    // Monitored-location names win; anything else falls back to the
+    // reverse-geocoded label (or its cached value when still pending).
+    const namesByKey = await namePromise;
+    const monitoredName = this.locationName(rLat, rLon);
+    const name = monitoredName ?? namesByKey.get(locationKey(rLat, rLon)) ?? null;
 
     const prediction = composePrediction({
       lat: rLat,

@@ -1,5 +1,6 @@
 import PredictionStore from '../../db/predictionStore.js';
 import { predictionService } from '../prediction/prediction.service.js';
+import { namingService } from '../geocode/locationNaming.service.js';
 import { haversineDistanceKm, locationKey } from '../../utils/geo.js';
 
 /** Risk levels that qualify as an actionable alert. */
@@ -11,11 +12,18 @@ const GLOBAL_LIMIT = 8;
 /**
  * Build the alert payload for a single prediction.
  *
+ * Names that reverse geocoding resolved after the prediction was stored
+ * are picked up from the naming cache so alerts never show a blank
+ * location for a valid coordinate.
+ *
  * @param {object} prediction - full prediction payload
  * @returns {object} alert-shaped object
  */
 function toAlert(prediction) {
-  const name = prediction.name || null;
+  const name =
+    prediction.name ||
+    namingService.nameFor(prediction.latitude, prediction.longitude) ||
+    null;
   const [region, country] = splitLocationName(name);
 
   return {
