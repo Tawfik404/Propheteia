@@ -27,12 +27,20 @@ export interface FwiIndices {
   DSR: number;
 }
 
+/** Terrain classification attached to a prediction (land-cover filter). */
+export interface LandCoverData {
+  type: string;
+  flammable: boolean;
+  vegetationCoverage: number | null;
+}
+
 /** Full prediction payload served by GET /api/predict and the socket. */
 export interface Prediction {
   latitude: number;
   longitude: number;
   predictedAt: string;
   name: string | null;
+  landCover: LandCoverData | null;
   weather: WeatherData;
   indices: FwiIndices;
   riskLevel: RiskLevel;

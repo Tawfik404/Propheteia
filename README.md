@@ -51,6 +51,11 @@ Response:
   "latitude": 31.63,
   "longitude": -8.01,
   "predictedAt": "2026-07-31T20:55:00.000Z",
+  "landCover": {
+    "type": "Shrubland",
+    "flammable": true,
+    "vegetationCoverage": 64
+  },
   "weather": {
     "temperature": 34.0,
     "humidity": 21.0,
@@ -83,6 +88,13 @@ Response:
 
 `monitor=1` (e.g. `?lat=..&lon=..&monitor=1`) additionally registers the
 location so the background jobs keep its state fresh.
+
+The endpoint rejects coordinates that do not sit on flammable terrain: the
+land-cover filter (ESA WorldCover 2021 satellite map, cached per grid cell)
+is applied BEFORE any weather/FWI computation, and a non-flammable location
+(open water, ice, bare desert, vegetation-free urban core) returns
+`422 Unprocessable Entity` instead of a prediction. See the terrain
+filtering section below for the full rule set.
 
 ### `GET /api/predictions?limit=50`
 
@@ -338,3 +350,44 @@ satellite imagery, NASA FIRMS integration, historical wildfire databases,
 machine-learning predictions, multiple weather providers and user accounts
 (e.g. provider interface in `services/weather/`, alert mapper in
 `services/alerts/`, monitored-location registry in `db/locationStore.js`).
+
+## Terrain filtering (land cover)
+
+Wildfire predictions are only generated where the land-cover map confirms
+combustible vegetation. The filter runs BEFORE any weather or FWI
+computation, so non-flammable locations never consume weather API requests.
+
+Pipeline:
+
+1. **Static land mask** (offline, `world-atlas`): prediction points are
+   placed on land, never over oceans or major lakes.
+2. **ESA WorldCover 2021** (primary, `services/land/worldCover.provider.js`):
+   each point samples the 10 m satellite land-cover map via a few byte
+   ranges of a Cloud-Optimized GeoTIFF (3° x 3° tiles on ESA's public S3).
+   The dominant class and the vegetation coverage (%) of the surrounding
+   area are reported.
+3. **OpenStreetMap fallback** (`services/land/osm.provider.js`): used only
+   when the satellite map is unreachable; maps OSM `landuse`/`natural` tags
+   onto the same class scale.
+4. **Threshold decision** (`services/land/landCover.service.js`):
+   - vegetation coverage ≥ 40% → flammable (configurable
+     `LAND_COVER_MIN_VEGETATION_PCT`),
+   - 20–40% → optional band, enabled via `LAND_COVER_ALLOW_OPTIONAL`,
+   - < 20% → skipped,
+   - water, ice and bare surfaces are never flammable regardless of the
+     threshold (open ocean, rivers, lakes, reservoirs, desert, sand, salt
+     flats, bare rock, quarries, permanent snow/ice),
+   - built-up areas are flammable only when adjacent to significant
+     vegetation (their coverage reflects the surrounding vegetation).
+
+Every classification is cached per rounded grid cell id (SQLite
+`land_cover_cache` table, TTL `LAND_COVER_CACHE_TTL_DAYS`), so repeated
+viewports and restarts never re-query the providers. The provider contract
+(`classify(points)`) is deliberately narrow so further environmental
+datasets (NDVI, EVI, soil moisture, fuel models, biomass, burn scars) can
+be plugged in without touching the prediction pipeline.
+
+API impact: prediction payloads carry a `landCover` block
+(`{ type, flammable, vegetationCoverage }`), the grid engine drops
+non-flammable cells before weather/FWI, and `/api/predict` rejects
+non-flammable coordinates with `422 Unprocessable Entity`.

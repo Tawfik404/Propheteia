@@ -19,6 +19,8 @@
  * @param {string} input.date - local YYYY-MM-DD of the computation
  * @param {{date: string|null}|null} [input.previous] - previous fuel state
  * @param {string|null} [input.name] - human-readable location name
+ * @param {object|null} [input.landCover] - terrain classification
+ *        { type, flammable, vegetationCoverage } or null when unknown
  * @returns {object} prediction payload (see README)
  */
 export function composePrediction({
@@ -30,12 +32,23 @@ export function composePrediction({
   date,
   previous = null,
   name = null,
+  landCover = null,
 }) {
   return {
     latitude: lat,
     longitude: lon,
     predictedAt: new Date().toISOString(),
     name,
+    landCover: landCover
+      ? {
+          type: landCover.type,
+          flammable: landCover.flammable,
+          vegetationCoverage:
+            Number.isFinite(Number(landCover.vegetationCoverage))
+              ? Math.round(Number(landCover.vegetationCoverage))
+              : null,
+        }
+      : null,
     weather: {
       temperature: weather.temperature,
       humidity: weather.humidity,

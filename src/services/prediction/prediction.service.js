@@ -2,6 +2,7 @@ import { weatherService } from '../weather/weather.service.js';
 import { fwiService } from '../fwi/fwi.service.js';
 import { mapFwiToRisk } from '../alerts/risk.mapper.js';
 import { namingService } from '../geocode/locationNaming.service.js';
+import { landCoverService } from '../land/landCover.service.js';
 import { composePrediction } from './payload.js';
 import FwiStateStore from '../../db/fwiStateStore.js';
 import LocationStore from '../../db/locationStore.js';
@@ -21,6 +22,9 @@ function todayDate() {
  *
  * End-to-end wildfire danger prediction for a geographic coordinate:
  *
+ *   0. terrain classification: the coordinate must sit on flammable,
+ *      vegetation-bearing land (land-cover filter) — otherwise the
+ *      request is rejected before any weather/FWI work happens,
  *   1. fetch current weather (cached) from the weather service,
  *   2. load the previous day's FFMC/DMC/DC for the location,
  *   3. compute the six FWI indices (official Canadian FWI System),
@@ -33,6 +37,7 @@ export class PredictionService {
     weather = weatherService,
     fwi = fwiService,
     names = namingService,
+    land = landCoverService,
     stateStore = new FwiStateStore(),
     locationStore = new LocationStore(),
     predictionStore = new PredictionStore(),
@@ -40,6 +45,7 @@ export class PredictionService {
     this.weather = weather;
     this.fwi = fwi;
     this.names = names;
+    this.land = land;
     this.stateStore = stateStore;
     this.locationStore = locationStore;
     this.predictionStore = predictionStore;
@@ -61,12 +67,36 @@ export class PredictionService {
 
     const startedAt = Date.now();
 
-    // 1. Weather (cached upstream), with reverse-geocoded naming running
-    //    in parallel so the point gets a readable name without slowing
-    //    the prediction (both resolve in the same request).
+    // 0. Terrain gate — no predictions on water, ice, bare desert or
+    //    urban cores without adjacent vegetation. Classification runs
+    //    before any weather/FWI work, so non-flammable points cost
+    //    nothing downstream. Naming starts in parallel: the resolved
+    //    name (when quick) makes the rejection message human-readable.
     const namePromise = this.names.resolveMany([{ lat: rLat, lon: rLon }], {
       timeBudgetMs: 4000,
     });
+    const landInfo = await this.land.classify(rLat, rLon);
+
+    if (!landInfo?.flammable) {
+      const namesByKey = await namePromise;
+      const label = namesByKey.get(locationKey(rLat, rLon)) ?? null;
+      logger.info(`[predict] rejected: terrain not flammable`, {
+        lat: rLat,
+        lon: rLon,
+        type: landInfo?.type ?? null,
+        vegetationCoverage: landInfo?.vegetationCoverage ?? null,
+        source: landInfo?.source ?? null,
+      });
+      throw new UnprocessableEntityError(
+        `Location is not on flammable terrain${
+          landInfo ? ` (${landInfo.type})` : ''
+        } — wildfire prediction requires vegetation`
+      );
+    }
+
+    // 1. Weather (cached upstream), with reverse-geocoded naming running
+    //    in parallel so the point gets a readable name without slowing
+    //    the prediction (both resolve in the same request).
     const weather = await this.weather.getWeather(rLat, rLon);
 
     if (
@@ -114,6 +144,7 @@ export class PredictionService {
       date,
       previous,
       name,
+      landCover: landInfo,
     });
 
     // Persist the snapshot so REST endpoints can serve it without

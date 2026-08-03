@@ -25,6 +25,8 @@ import logger from '../../../utils/logger.js';
 const RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
 /** Total attempts per request (1 initial + 2 retries). */
 const MAX_ATTEMPTS = 3;
+/** Pause between sequential batch chunks (politeness vs. rate limits). */
+const BATCH_PACING_MS = 800;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -122,48 +124,59 @@ export class OpenMeteoProvider {
    *
    * Open-Meteo accepts repeated `latitude`/`longitude` parameters and
    * answers with one full response per location. Points are chunked (one
-   * HTTP request per chunk, executed sequentially) to stay well below the
-   * provider's request limit.
+   * HTTP request per chunk, executed sequentially) to stay below the
+   * provider's 100-location per-request cap.
    *
    * @param {Array<{lat: number, lon: number}>} points
-   * @returns {Promise<Map<string, object>>} normalized weather by `lat,lon` key
-   * @throws {ExternalServiceError} on provider/network failures
+   * @returns {Promise<Map<string, object>>} normalized weather by `lat,lon` key.
+   *   Chunks that keep failing are skipped (logged, not fatal) so a
+   *   rate-limited or flaky provider degrades the result instead of
+   *   failing an entire grid computation.
    */
-  async getWeatherBatch(points, { chunkSize = 250 } = {}) {
+  async getWeatherBatch(points, { chunkSize = 40 } = {}) {
     const results = new Map();
+    let chunkIndex = 0;
     for (let i = 0; i < points.length; i += chunkSize) {
       const chunk = points.slice(i, i + chunkSize);
-      const startedAt = Date.now();
-      const params = [];
-      for (const { lat, lon } of chunk) {
-        params.push(`latitude=${lat}&longitude=${lon}`);
-      }
-      const response = await this.fetchWithRetry(
-        `/v1/forecast?${params.join('&')}`,
-        {
-          current: 'temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation,weather_code',
-          daily: 'precipitation_sum',
-          timezone: 'auto',
-          wind_speed_unit: 'kmh',
-          forecast_days: 1,
-        },
-        'batch'
-      );
-
-      const durationMs = Date.now() - startedAt;
-      logger.info(`[weather] open-meteo batch completed (${durationMs}ms)`, {
-        points: chunk.length,
-      });
-
-      const entries = Array.isArray(response.data) ? response.data : [];
-      for (let index = 0; index < chunk.length && index < entries.length; index += 1) {
-        const { lat, lon } = chunk[index];
-        try {
-          results.set(this.locationKey(lat, lon), this.normalize(entries[index]));
-        } catch {
-          // skip a malformed entry; the caller falls back to per-point fetch
+      try {
+        const startedAt = Date.now();
+        const params = [];
+        for (const { lat, lon } of chunk) {
+          params.push(`latitude=${lat}&longitude=${lon}`);
         }
+        const response = await this.fetchWithRetry(
+          `/v1/forecast?${params.join('&')}`,
+          {
+            current: 'temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation,weather_code',
+            daily: 'precipitation_sum',
+            timezone: 'auto',
+            wind_speed_unit: 'kmh',
+            forecast_days: 1,
+          },
+          'batch'
+        );
+
+        const durationMs = Date.now() - startedAt;
+        logger.info(`[weather] open-meteo batch completed (${durationMs}ms)`, {
+          points: chunk.length,
+        });
+
+        const entries = Array.isArray(response.data) ? response.data : [];
+        for (let index = 0; index < chunk.length && index < entries.length; index += 1) {
+          const { lat, lon } = chunk[index];
+          try {
+            results.set(this.locationKey(lat, lon), this.normalize(entries[index]));
+          } catch {
+            // skip a malformed entry; the caller falls back to per-point fetch
+          }
+        }
+      } catch (err) {
+        logger.warn(
+          `[weather] open-meteo batch chunk failed after retries (${chunk.length} points), skipping: ${err.message?.slice(0, 120)}`
+        );
       }
+      chunkIndex += 1;
+      if (i + chunkSize < points.length) await sleep(BATCH_PACING_MS);
     }
     return results;
   }

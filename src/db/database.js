@@ -71,6 +71,22 @@ CREATE TABLE IF NOT EXISTS geocode_cache (
 
 CREATE INDEX IF NOT EXISTS idx_geocode_cache_resolved_at
   ON geocode_cache (resolved_at DESC);
+
+CREATE TABLE IF NOT EXISTS land_cover_cache (
+  location_key     TEXT PRIMARY KEY,
+  lat              REAL NOT NULL,
+  lon              REAL NOT NULL,
+  class_id         INTEGER,
+  type             TEXT NOT NULL,
+  vegetation_cover REAL,
+  flammable        INTEGER NOT NULL DEFAULT 0,
+  water            INTEGER NOT NULL DEFAULT 0,
+  source           TEXT NOT NULL,
+  sampled_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_land_cover_cache_sampled_at
+  ON land_cover_cache (sampled_at DESC);
 `;
 
 /**

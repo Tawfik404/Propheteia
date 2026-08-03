@@ -64,11 +64,12 @@ function jitterForCell(ci, cj) {
 /**
  * Candidate points for a grid cell, ordered by preference.
  *
- * The fully jittered point is preferred; if it is not burnable the
+ * The fully jittered point is preferred; if it is not on land the
  * candidates fall back to the cell center and single-axis jitters, all
  * strictly inside the cell. `#resolvePoint` picks the first candidate
  * that is on land, so a jitter never drags a prediction into water and
- * the final point is always a valid, stable location.
+ * the final point is always a valid, stable location. Flammability is
+ * decided afterwards by the terrain classification step.
  *
  * Exported for testing.
  *
@@ -98,13 +99,16 @@ export function candidatePoints(cell, spacing) {
  *
  *   1. generate a geographic grid whose spacing depends on the zoom level
  *      (coarse when zoomed out, fine when zoomed in),
- *   2. keep only cells that intersect land and could actually burn,
- *      placing each prediction point deterministically inside its cell
- *      (jittered, land-safe — no straight rows/columns),
- *   3. fetch weather for the surviving cells in a few batched requests,
+ *   2. keep only cells that intersect land, placing each prediction point
+ *      deterministically inside its cell (jittered, land-safe — no
+ *      straight rows/columns),
+ *   3. classify the surviving points against the land-cover map and drop
+ *      everything that cannot burn (water, ice, bare desert, urban
+ *      cores) — this happens BEFORE any weather or FWI computation,
+ *   4. fetch weather for the surviving cells in a few batched requests,
  *      in parallel with human-readable place-name resolution,
- *   4. compute the FWI indices per cell,
- *   5. return a compact payload for the viewport, caching the whole
+ *   5. compute the FWI indices per cell,
+ *   6. return a compact payload for the viewport, caching the whole
  *      result so repeated/overlapping viewports skip the computation.
  *
  * Cells at or above `GRID_PERSIST_MIN_RISK` are persisted into the
@@ -219,27 +223,48 @@ export class GridService {
 
   /**
    * Full computation pipeline for a cell set (cache-miss path).
+   *
+   * The order is deliberate: terrain classification happens BEFORE any
+   * weather or FWI work, so non-flammable cells (water, ice, bare
+   * desert, urban cores) never trigger weather API requests.
    */
   async #compute(cells, spacing, region) {
     const date = todayDate();
     const month = new Date().getMonth() + 1;
 
-    // 1. Land/burnable filter — no points over ocean, lakes or ice.
-    //    Each surviving cell keeps its first land-safe candidate point,
-    //    so displayed locations never form perfect grid lines.
-    const landCells = [];
+    // 1. Land-safe candidate placement (static mask, no network): each
+    //    cell keeps its first on-land candidate point, so displayed
+    //    locations never form perfect grid lines and never sit in water.
+    const onLand = [];
     for (const cell of cells) {
       const point = this.#resolvePoint(cell, spacing);
-      if (point) landCells.push(point);
+      if (point) onLand.push(point);
     }
 
-    // 2. Weather (batched, cache-aware) and place-name resolution run in
+    // 2. Terrain classification — the flammable filter (cached).
+    //    Points on non-flammable ground are dropped right here, before
+    //    any weather request. If every point fails to classify, return
+    //    an empty region instead of predicting on unknown terrain.
+    const { byKey: landByKey, failures } = await this.land.classifyBatch(onLand);
+    const landCells = onLand.filter(
+      (point) => landByKey.get(locationKey(point.lat, point.lon))?.flammable
+    );
+    if (onLand.length > 0 && failures === onLand.length) {
+      logger.warn(`[grid] terrain classification failed for every cell`, {
+        cells: cells.length,
+        spacing,
+      });
+      throw new Error('Terrain classification unavailable — retry later');
+    }
+
+    // 3. Weather (batched, cache-aware) and place-name resolution run in
     //    parallel: naming is time-bounded and never blocks the FWI work.
     const namesPromise = this.names.resolveMany(landCells);
     const weatherByKey = await this.weather.getWeatherBatch(landCells);
     const namesByKey = await namesPromise;
 
-    // 3+4. FWI per cell + payload, persisting meaningful cells only.
+    // 4+5. FWI per flammable cell + payload, persisting meaningful
+    //    cells only.
     const predictions = [];
     const persistRank = RISK_RANK[GRID_PERSIST_MIN_RISK] ?? RISK_RANK.Moderate;
     for (const cell of landCells) {
@@ -270,6 +295,7 @@ export class GridService {
         date,
         previous: null,
         name,
+        landCover: landByKey.get(key),
       });
       predictions.push(prediction);
 
@@ -283,13 +309,14 @@ export class GridService {
       }
     }
 
-    // 5. Keep the store bounded.
+    // 6. Keep the store bounded.
     this.predictionStore.prune(PREDICTION_STORE_MAX_ROWS);
 
     const namedCount = predictions.filter((p) => p.name).length;
     logger.info(`[grid] region computed`, {
       cells: cells.length,
-      landCells: landCells.length,
+      onLand: onLand.length,
+      flammable: landCells.length,
       predictions: predictions.length,
       named: namedCount,
       spacing,
@@ -304,15 +331,18 @@ export class GridService {
   }
 
   /**
-   * Pick the first land-safe candidate point for a grid cell.
+   * Pick the first on-land candidate point for a grid cell.
+   *
+   * Static land mask only (no network, no cache dependency): the
+   * flammability decision happens right after in `classifyBatch`.
    *
    * @param {{lat:number, lon:number, ci:number, cj:number}} cell
    * @param {number} spacing
-   * @returns {{lat:number, lon:number}|null} null when no candidate burns
+   * @returns {{lat:number, lon:number}|null} null when no candidate is on land
    */
   #resolvePoint(cell, spacing) {
     for (const candidate of candidatePoints(cell, spacing)) {
-      if (this.land.isBurnable(candidate.lat, candidate.lon)) return candidate;
+      if (this.land.isLand(candidate.lat, candidate.lon)) return candidate;
     }
     return null;
   }
